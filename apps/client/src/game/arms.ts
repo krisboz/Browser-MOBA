@@ -1,9 +1,12 @@
-// The two bean-shaped arms. Purely visual: driven by the server's wind-up progress and release tick.
+// The two bean-shaped arms. Purely visual: driven by the server's wind-up progress and release ticks.
+// One animation for autos (arms pull back, then strike), one for spells (arms come forward, then thrust).
 
-// Angles from the facing direction, in radians.
-const REST = (100 * Math.PI) / 180; // beside the body, a little back
-const RAISED = (140 * Math.PI) / 180; // pulled back at the end of a wind-up
-const STRIKE = (30 * Math.PI) / 180; // snapped forward on release
+const deg = (d: number) => (d * Math.PI) / 180;
+const REST = deg(100); // beside the body, a little back
+const AUTO_RAISED = deg(140); // pulled back at the end of an auto wind-up
+const AUTO_STRIKE = deg(30); // snapped forward on release
+const SPELL_RAISED = deg(55); // brought up in front during a spell wind-up
+const SPELL_THRUST = deg(12); // both arms thrust straight ahead on release
 const SNAP_TIME = 0.06;
 const RECOVER_TIME = 0.22;
 
@@ -14,18 +17,33 @@ export interface ArmPose {
   scale: number;
 }
 
-/**
- * `windUp` is the wind-up progress (0..1) or null; `sinceRelease` is seconds since the last release, or null.
- */
-export function armPose(windUp: number | null, sinceRelease: number | null): ArmPose {
-  if (windUp !== null) {
-    const p = easeOut(windUp);
-    return { angle: REST + (RAISED - REST) * p, scale: 1 + 0.35 * p };
+export interface ArmState {
+  /** Auto wind-up progress 0..1, or null. */
+  windUp: number | null;
+  /** Spell wind-up progress 0..1, or null. */
+  cast: number | null;
+  /** Seconds since the last auto release / spell release, or null if never. */
+  sinceRelease: number | null;
+  sinceCast: number | null;
+}
+
+export function armPose(s: ArmState): ArmPose {
+  if (s.cast !== null) {
+    const p = easeOut(s.cast);
+    return { angle: REST + (SPELL_RAISED - REST) * p, scale: 1 + 0.4 * p };
   }
-  if (sinceRelease !== null && sinceRelease >= 0 && sinceRelease < SNAP_TIME + RECOVER_TIME) {
-    if (sinceRelease < SNAP_TIME) return { angle: STRIKE, scale: 1.2 };
-    const k = easeOut((sinceRelease - SNAP_TIME) / RECOVER_TIME);
-    return { angle: STRIKE + (REST - STRIKE) * k, scale: 1.2 - 0.2 * k };
+  if (s.windUp !== null) {
+    const p = easeOut(s.windUp);
+    return { angle: REST + (AUTO_RAISED - REST) * p, scale: 1 + 0.35 * p };
+  }
+  // Whichever release was more recent decides the follow-through.
+  const spellFirst = s.sinceCast !== null && (s.sinceRelease === null || s.sinceCast < s.sinceRelease);
+  const since = spellFirst ? s.sinceCast : s.sinceRelease;
+  const strike = spellFirst ? SPELL_THRUST : AUTO_STRIKE;
+  if (since !== null && since >= 0 && since < SNAP_TIME + RECOVER_TIME) {
+    if (since < SNAP_TIME) return { angle: strike, scale: 1.25 };
+    const k = easeOut((since - SNAP_TIME) / RECOVER_TIME);
+    return { angle: strike + (REST - strike) * k, scale: 1.25 - 0.25 * k };
   }
   return { angle: REST, scale: 1 };
 }

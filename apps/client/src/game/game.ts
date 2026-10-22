@@ -1,12 +1,12 @@
 import type { BalanceData } from "@moba/balance";
-import type { DotSnapshot, GameEvent, Loadout, ServerMessage, Side } from "@moba/protocol";
+import type { CastSlot, DotSnapshot, GameEvent, Loadout, ServerMessage, Side } from "@moba/protocol";
 import { createWorld, FixedStepper, inRect, type MapGeometry } from "@moba/sim";
 import { hudActions, hudStore, urlPreset } from "../store.js";
 import { ClockSync } from "./clock.js";
 import { SnapshotBuffer } from "./interpolation.js";
 import { Net } from "./net.js";
 import { Predictor } from "./prediction.js";
-import { Renderer, type ClickMarker, type DrawnDot, type FloatingNumber, type Vec } from "./renderer.js";
+import { Renderer, type ClickMarker, type DrawnDot, type FloatingText, type Vec } from "./renderer.js";
 
 // Other dots are drawn two snapshot intervals in the past so there is almost always a snapshot on each side.
 const INTERP_DELAY = 0.1;
@@ -17,6 +17,8 @@ const PING_INTERVAL = 0.5;
 const MAX_CLOCK_DRIFT = 6;
 // Extra slack around a dot for clicking on it, in pixels.
 const CLICK_SLOP = 10;
+const CAST_KEYS: Record<string, CastSlot> = { q: "Q", w: "W", e: "E", r: "R", d: "D", f: "F" };
+const SLOTS: CastSlot[] = ["Q", "W", "E", "R", "D", "F"];
 
 interface Session {
   balance: BalanceData;
@@ -43,9 +45,10 @@ export class Game {
   private lastPing = -Infinity;
   private marker: ClickMarker | null = null;
   private mouse: Vec | null = null;
-  /** Hits waiting for the drawn time to reach them, then floating. */
-  private pendingHits: Extract<GameEvent, { kind: "hit" }>[] = [];
-  private numbers: FloatingNumber[] = [];
+  /** Events waiting for the drawn time to reach them, then floating as text. */
+  private pendingEvents: GameEvent[] = [];
+  private texts: FloatingText[] = [];
+  private lastAbilityHud = 0;
   /** Enemies as last drawn, for clicking on them. */
   private drawnEnemies: DotSnapshot[] = [];
   private frame = 0;
@@ -137,7 +140,7 @@ export class Game {
         if (!s) return;
         const snap = msg.snap;
         s.buffer.push(snap, now);
-        for (const e of snap.events) if (e.kind === "hit") this.pendingHits.push(e);
+        this.pendingEvents.push(...snap.events);
         hudStore.set({
           score: snap.score,
           winner: snap.winner,
@@ -167,7 +170,9 @@ export class Game {
     this.lastPing = now;
   }
 
-  private send(body: { type: "move"; to: Vec } | { type: "attack"; target: string } | { type: "stop" }): void {
+  private send(
+    body: { type: "move"; to: Vec } | { type: "attack"; target: string } | { type: "stop" } | { type: "cast"; slot: CastSlot; aim: Vec },
+  ): void {
     const seq = ++this.seq;
     // Before the clock has synced there is nothing to predict with; the server applies an untimed command at once.
     this.net.command(this.predictor ? this.predictor.issue({ ...body, seq }) : { ...body, seq, tick: 0 });
@@ -204,7 +209,13 @@ export class Game {
 
   private onKey(e: KeyboardEvent): void {
     if (e.repeat) return;
-    if (e.key === "s" || e.key === "S") this.send({ type: "stop" });
+    const key = e.key.toLowerCase();
+    if (key === "s") return this.send({ type: "stop" });
+    const slot = CAST_KEYS[key];
+    if (!slot) return;
+    // Quick cast: goes off toward wherever the cursor is.
+    const aim = this.mouse ? this.renderer.screenToWorld(this.mouse) : this.lastSelf;
+    if (aim) this.send({ type: "cast", slot, aim });
   }
 
   private loop(timeMs: number): void {
@@ -240,6 +251,7 @@ export class Game {
     this.lastSelf = selfPos && { ...selfPos };
 
     if (s) this.draw(s, now, dt, selfPos);
+    if (s && now - this.lastAbilityHud > 0.1) this.updateAbilityBar(s, now);
 
     this.fpsFrames++;
     const frameTime = timeMs / 1000;
@@ -256,11 +268,25 @@ export class Game {
     }
   }
 
+  private updateAbilityBar(s: Session, now: number): void {
+    this.lastAbilityHud = now;
+    const cooldowns = this.predictor?.self.cooldowns ?? s.buffer.latest?.self?.cooldowns;
+    if (!cooldowns) return;
+    const ids: Record<CastSlot, string | null> = { ...s.loadout.abilities, D: s.loadout.summoners[0], F: s.loadout.summoners[1] };
+    hudStore.set({
+      abilities: SLOTS.flatMap((slot) => {
+        const def = ids[slot] ? s.balance.abilities.find((a) => a.id === ids[slot]) ?? s.balance.summoners.find((a) => a.id === ids[slot]) : undefined;
+        return def ? [{ slot, name: def.name, cooldown: Math.round(cooldowns[slot] * 10) / 10, max: def.cooldown }] : [];
+      }),
+    });
+  }
+
   private draw(s: Session, now: number, dt: number, selfPos: Vec | null): void {
     const sample = s.buffer.sample(now);
     const hovered = this.mouse ? this.enemyAt(this.mouse)?.id : undefined;
     const inBrush = (pos: Vec) => s.geometry.brush.some((b) => inRect(pos, b));
-    const sinceRelease = (tick: number) => (tick < 0 ? null : sample.time - tick / s.tickRate);
+    const since = (tick: number) => (tick < 0 ? null : sample.time - tick / s.tickRate);
+    const drawnAt = new Map<string, Vec>();
 
     const dots: DrawnDot[] = [];
     for (const d of sample.dots) {
@@ -275,31 +301,43 @@ export class Game {
         health: d.health,
         maxHealth: d.maxHealth,
         windUp: d.windUp,
-        sinceRelease: sinceRelease(d.lastReleaseTick),
+        sinceRelease: since(d.lastReleaseTick),
+        cast: d.cast,
+        sinceCast: since(d.lastCastTick),
+        status: d.status,
+        motion: d.motion,
+        channelling: d.channelling,
         isSelf,
         inBrush: inBrush(pos),
         dummy: d.dummy,
         hovered: d.id === hovered,
       });
+      drawnAt.set(d.id, pos);
     }
     this.drawnEnemies = sample.dots.filter((d) => d.alive && d.side !== s.side);
     if (selfPos) this.renderer.followCamera(selfPos, dt);
 
     // Damage numbers appear when the drawn time reaches the hit, so they line up with the hit on screen.
-    const due = this.pendingHits.filter((h) => h.tick / s.tickRate <= sample.time);
-    this.pendingHits = this.pendingHits.filter((h) => h.tick / s.tickRate > sample.time);
-    for (const h of due) this.numbers.push({ x: h.x, y: h.y, amount: h.amount, age: 0 });
-    for (const n of this.numbers) n.age += dt;
-    this.numbers = this.numbers.filter((n) => n.age < NUMBER_LIFETIME);
+    const due = this.pendingEvents.filter((e) => e.tick / s.tickRate <= sample.time);
+    this.pendingEvents = this.pendingEvents.filter((e) => e.tick / s.tickRate > sample.time);
+    for (const e of due) {
+      if (e.kind === "hit") this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.amount)), color: e.ability ? "#ffcc80" : "#fff3c4", age: 0 });
+      if (e.kind === "blocked") this.texts.push({ x: e.x, y: e.y, text: "BLOCKED", color: "#ce93d8", age: 0 });
+      if (e.kind === "heal" && e.amount > 0) this.texts.push({ x: e.x, y: e.y, text: `+${Math.round(e.amount)}`, color: "#a5d6a7", age: 0 });
+    }
+    for (const n of this.texts) n.age += dt;
+    this.texts = this.texts.filter((n) => n.age < NUMBER_LIFETIME);
 
     this.renderer.draw({
       balance: s.balance,
       geometry: s.geometry,
       dots,
       projectiles: sample.projectiles,
+      spells: sample.spells,
+      drawnAt,
       path: this.predictor?.path ?? [],
       pathFrom: selfPos,
-      numbers: this.numbers,
+      texts: this.texts,
       marker: this.marker,
       mouse: this.mouse,
     });

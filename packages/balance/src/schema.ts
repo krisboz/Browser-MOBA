@@ -27,8 +27,140 @@ const statBonus = z
   .partial()
   .strict();
 
-// Blocks get one strict schema per kind in M3. Until then a block is any object with a kind.
-const block = z.object({ kind: z.string().min(1) }).passthrough();
+// ---- Effects: what a block does to each dot it reaches.
+
+const damageEffect = z
+  .object({
+    kind: z.literal("damage"),
+    base: nonNeg,
+    /** Share of the caster's attack (physical) or magic attack (magic) added on top. */
+    ratio: nonNeg,
+    /** Extra damage at low health: x (1 + this x missing share of the target's health). */
+    missingHealthBonus: nonNeg.optional(),
+  })
+  .strict();
+
+const effect = z.discriminatedUnion("kind", [
+  damageEffect,
+  z.object({ kind: z.literal("root"), duration: nonNeg }).strict(),
+  z.object({ kind: z.literal("stun"), duration: nonNeg }).strict(),
+  z.object({ kind: z.literal("slow"), amount: share, duration: nonNeg }).strict(),
+  z.object({ kind: z.literal("knockback"), distance: nonNeg, speed: pos }).strict(),
+  z
+    .object({
+      kind: z.literal("applyMark"),
+      /** Autos from the same source after the marking one; the last of them detonates it. */
+      hitsToDetonate: z.number().int().positive(),
+      duration: nonNeg,
+      onDetonate: z.array(damageEffect),
+    })
+    .strict(),
+]);
+
+// ---- Blocks: the coded building pieces every ability and summoner is made of.
+
+const areaBlock = z
+  .object({
+    kind: z.literal("area"),
+    /** instant: hits once now; delayed: hits once after `delay`; lasting: stays for `duration`. */
+    timing: z.enum(["instant", "delayed", "lasting"]),
+    delay: nonNeg,
+    duration: nonNeg,
+    /** How far from the caster it may be placed. 0 centres it on the caster. */
+    castRange: nonNeg,
+    radius: pos,
+    /** Applied once to each enemy it reaches. */
+    onHit: z.array(effect),
+    /** Lasting areas: applied every tick to enemies inside. */
+    whileInside: z.array(effect),
+  })
+  .strict();
+
+const block = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("projectile"),
+      hits: z.enum(["first", "pierce"]),
+      /** Piercing: damage share lost on every target after the first. */
+      falloffAfterFirst: share,
+      /** Flies back to the caster after reaching its range, hitting again on the way. */
+      returns: z.boolean(),
+      speed: pos,
+      range: pos,
+      width: nonNeg,
+      onHit: z.array(effect),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("hook"),
+      speed: pos,
+      range: pos,
+      width: nonNeg,
+      /** How fast the hook and its victim come back. Must beat every walking speed. */
+      retractSpeed: pos,
+      onHit: z.array(effect),
+    })
+    .strict(),
+  areaBlock,
+  z
+    .object({
+      kind: z.literal("empoweredAuto"),
+      /** Seconds the next auto stays empowered. */
+      duration: nonNeg,
+      resetAttackTimer: z.boolean(),
+      onHit: z.array(effect),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("move"),
+      /** dash and leap travel and can be hit on the way; blink is instant. */
+      style: z.enum(["dash", "leap", "blink"]),
+      distance: pos,
+      speed: pos,
+      crossesWalls: z.boolean(),
+      onLand: z.array(areaBlock),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("zone"),
+      radius: pos,
+      expandTime: nonNeg,
+      duration: nonNeg,
+      pushesEnemiesOut: z.boolean(),
+      blocksSpellsFromOutside: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("channel"),
+      /** The caster can't walk, dash, leap or blink while channelling. */
+      duration: pos,
+      shots: z.number().int().positive(),
+      /** Seconds between shots; each recast of the slot fires the next one at the cursor. */
+      shotInterval: nonNeg,
+      shot: areaBlock,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("placed"),
+      castRange: nonNeg,
+      radius: pos,
+      lifetime: pos,
+      onEnter: z.array(effect),
+    })
+    .strict(),
+  z.object({ kind: z.literal("buff"), duration: nonNeg, fades: z.boolean(), stats: statBonus }).strict(),
+  z
+    .object({ kind: z.literal("shield"), blocks: z.enum(["nextSpell", "damage"]), amount: nonNeg, duration: nonNeg })
+    .strict(),
+  z.object({ kind: z.literal("heal"), amount: nonNeg }).strict(),
+  z.object({ kind: z.literal("cleanse") }).strict(),
+  z.object({ kind: z.literal("invisible"), duration: nonNeg }).strict(),
+]);
 
 const ability = z
   .object({
@@ -201,6 +333,15 @@ export const balanceSchema = z
       });
     }
 
+    // "A hook retracts faster than anyone can walk": checked here so no balance version can break it.
+    [...b.abilities, ...b.summoners].forEach((a, i) => {
+      for (const blk of a.blocks) {
+        if (blk.kind === "hook" && blk.retractSpeed <= b.dot.moveSpeedCap) {
+          fail([a.id, "blocks", i], `hook retracts at ${blk.retractSpeed}, not faster than the ${b.dot.moveSpeedCap} walking cap`);
+        }
+      }
+    });
+
     const abilities = new Map(b.abilities.map((a) => [a.id, a]));
     const summoners = new Set(b.summoners.map((s) => s.id));
     b.presets.forEach((p, i) => {
@@ -227,6 +368,10 @@ export type AbilityDef = BalanceData["abilities"][number];
 export type SummonerDef = BalanceData["summoners"][number];
 export type ItemDef = BalanceData["items"][number];
 export type PresetDef = BalanceData["presets"][number];
+export type BlockDef = z.infer<typeof block>;
+export type AreaBlockDef = z.infer<typeof areaBlock>;
+export type EffectDef = z.infer<typeof effect>;
+export type DamageEffectDef = z.infer<typeof damageEffect>;
 
 export type ParseResult = { ok: true; data: BalanceData } | { ok: false; issues: string[] };
 

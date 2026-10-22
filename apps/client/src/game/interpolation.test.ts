@@ -1,13 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { SnapshotBuffer } from "./interpolation.js";
 
-const dot = (x: number) => ({ id: "a", side: 0 as const, x, y: 0, facing: 0, health: 100, maxHealth: 100, alive: true, windUp: null, lastReleaseTick: -1, dummy: false });
+const status = { stunned: false, rooted: false, slowed: false, spellShield: false, barrier: 0, buffed: false, empowered: false, mark: null, invisible: false };
+const dot = (x: number) => ({
+  id: "a",
+  side: 0 as const,
+  x,
+  y: 0,
+  facing: 0,
+  health: 100,
+  maxHealth: 100,
+  alive: true,
+  windUp: null,
+  lastReleaseTick: -1,
+  cast: null,
+  lastCastTick: -1,
+  status,
+  motion: null,
+  anchored: false,
+  channelling: false,
+  dummy: false,
+});
 const snap = (tick: number, x: number) => ({
   tick,
   ackSeq: 0,
   self: null,
   dots: [dot(x)],
   projectiles: [],
+  spells: [],
   score: [0, 0] as [number, number],
   winner: null,
   events: [],

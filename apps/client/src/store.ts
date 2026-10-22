@@ -21,6 +21,8 @@ export interface HudState {
   /** Seconds until you respawn, while dead. */
   respawnIn: number | null;
   hasDummy: boolean;
+  /** Your ability bar. */
+  abilities: { slot: string; name: string; cooldown: number; max: number }[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -42,6 +44,7 @@ let state: HudState = {
   winner: null,
   respawnIn: null,
   hasDummy: false,
+  abilities: [],
 };
 const listeners = new Set<() => void>();
 

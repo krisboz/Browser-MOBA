@@ -11,7 +11,7 @@ import { Predictor } from "./prediction.js";
  */
 function harness({ oneWay, lead, dummyAt }: { oneWay: number; lead: number; dummyAt?: { x: number; y: number } }) {
   const server = createWorld(seedV1);
-  const loadout = { preset: null, range: "ranged" as const, points: {} };
+  const loadout = { preset: null, range: "ranged" as const, points: {}, abilities: { Q: null, W: null, E: null, R: null }, summoners: [null, null] as [null, null] };
   const dot = addDot(server, { id: "p1", side: 0, loadout });
   if (dummyAt) addDot(server, { id: "dummy", side: 1, loadout, pos: dummyAt, dummy: true });
   const toServer: { at: number; cmd: Command }[] = [];

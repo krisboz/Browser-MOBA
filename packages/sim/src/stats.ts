@@ -44,10 +44,11 @@ export function pointIssues(balance: BalanceData, points: Loadout["points"]): st
 
 /** Resolves a loadout by preset id, or "vanilla" / "vanilla-melee" for a dot with no points. */
 export function loadoutFor(balance: BalanceData, preset: string | undefined): Loadout | null {
-  if (preset === "vanilla" || preset === "vanilla-ranged") return { preset: null, range: "ranged", points: {} };
-  if (preset === "vanilla-melee") return { preset: null, range: "melee", points: {} };
+  const none = { abilities: { Q: null, W: null, E: null, R: null }, summoners: [null, null] as [null, null] };
+  if (preset === "vanilla" || preset === "vanilla-ranged") return { preset: null, range: "ranged", points: {}, ...none };
+  if (preset === "vanilla-melee") return { preset: null, range: "melee", points: {}, ...none };
   const p = preset === undefined ? balance.presets[0] : balance.presets.find((x) => x.id === preset);
-  return p ? { preset: p.id, range: p.range, points: { ...p.points } } : null;
+  return p ? { preset: p.id, range: p.range, points: { ...p.points }, abilities: { ...p.abilities }, summoners: [...p.summoners] } : null;
 }
 
 /** Damage taken = damage x k / (k + resist), with k from the balance (100: 100 resist halves damage). */

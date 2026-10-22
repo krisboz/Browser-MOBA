@@ -114,9 +114,9 @@ Stats from base + points, the damage formula, death and 6 s respawn, first to 5.
 
 Statuses and forced movement first, then the skill blocks, then the 16 abilities and 5 summoners as data. Scenario tests for every interaction rule in the notes, written before the abilities that need them.
 
-- [ ] Every preset can cast its full kit against the dummy.
-- [ ] Scenario tests pass: double hook drags both, Flash while anchored drags the victim, root blocks Dash/Leap/Flash only, newest forced movement wins, Dome blocks spells cast from outside and keeps those cast inside.
-- [ ] A full round of spells from Poke or Diver takes more than half of a vanilla dot's health. Tank and Marksman are tuned in M5.
+- [x] Every preset can cast its full kit against the dummy.
+- [x] Scenario tests pass: double hook drags both, Flash while anchored drags the victim, root blocks Dash/Leap/Flash only, newest forced movement wins, Dome blocks spells cast from outside and keeps those cast inside.
+- [x] A full round of spells from Poke or Diver takes more than half of a vanilla dot's health. Tank and Marksman are tuned in M5.
 
 ### M4: Lane and match
 
@@ -213,7 +213,17 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Dome edge cases (continuous push against a hook across its edge) | M3 | No special handling; let the blocks interact, jank accepted |
 | Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
-| Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); S stops. Left click does the same as right until M3 uses it for aiming |
+| Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); S stops. Left click does the same: spells don't need it, see quick cast |
+| How spells are aimed and cast | M3 | Quick cast: Q W E R for abilities, D F for summoners, going off toward the cursor when the key is pressed. A wind-up first (cancelled by a move, stop or stun: nothing fires, no cooldown). Casting cancels an auto wind-up (refunded) but keeps the attack order |
+| R before levels exist | M3 | Castable from the start; M4 adds the level 3 unlock |
+| Do skillshots stop at walls? | M3 | No: like autos, they fly over walls. Dashes, leaps and knockbacks stop at walls; Flash and pulls go through |
+| Root or stun during a dash or leap | M3 | Stops it where the dot is; a stopped leap does no landing damage |
+| Dome: when does it push, and what is "inside"? | M3 | It pushes enemies to its edge for its whole 4 s, not just while expanding. A dot is inside when its body overlaps the dome. The push is a forced movement, so it ends a pull in progress (jank accepted) |
+| Artillery controls | M3 | R starts a 4 s self-rooted channel and fires the first shot at the cursor; each R press fires the next, at least 0.5 s apart, up to 5. S ends it early |
+| Spell Shield against areas and hooks | M3 | It blocks the whole cast on that dot: a lasting area never gets through later, a blocked hook comes back empty |
+| Flash details | M3 | Goes to the cursor if it is closer than 400. Ends your own dash or leap, but not a pull or a push. Can't be cast while rooted or stunned; can while anchored |
+| Vanish and Trap visibility | M3 | Vanish ends when you attack or cast. Traps are hidden from the other side and go off once |
+| Mark details | M3 | Lasts 5 s; the three autos after the marking one detonate it for 120 + 0.6 attack |
 | Clicking an enemy: one auto, or keep attacking? | M2 | Keep attacking until another command, League style; a dot never picks a target by itself. The order lapses if the target dies or goes out of sight |
 | Does cancelling a wind-up cost the attack? | M2 | No: the attack timer is refunded, so you can attack again at once |
 | Where the target dummy stands, and what it is | M2 | A vanilla ranged dot at x 1650, y 300 (past the middle, clear of brush), patrolling 200 either side across the lane; respawns on its spot. Present while only one person is in the room |

@@ -71,7 +71,7 @@ describe("death, respawn and the match", () => {
     const world = createWorld(seedV1);
     const b = addDot(world, { id: "b", side: 1, loadout: VANILLA });
     b.pos = { x: 1500, y: 300 };
-    damageDot(world, "a", 0, b, 5000, "physical");
+    damageDot(world, "a", 0, b, 5000, "physical", null);
     expect(b.alive).toBe(false);
     run(world, 5.9);
     expect(b.alive).toBe(false);
@@ -86,7 +86,7 @@ describe("death, respawn and the match", () => {
     const a = addDot(world, { id: "a", side: 0, loadout: VANILLA });
     const b = addDot(world, { id: "b", side: 1, loadout: VANILLA });
     for (let i = 0; i < 5; i++) {
-      damageDot(world, "a", 0, b, 5000, "physical");
+      damageDot(world, "a", 0, b, 5000, "physical", null);
       run(world, 6.1);
     }
     expect(world.score).toEqual([5, 0]);

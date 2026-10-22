@@ -3,6 +3,7 @@ import {
   addDot,
   applyCommand,
   createWorld,
+  drainEvents,
   FixedStepper,
   isVisibleTo,
   loadoutFor,
@@ -165,10 +166,12 @@ export class Room {
       }
     }
     step(this.world);
+    const events = drainEvents(this.world);
     for (const player of this.players.values()) {
-      for (const e of this.world.events) {
+      for (const e of events) {
         const target = this.world.dots.get(e.target);
-        if (e.source === player.dotId || (target && isVisibleTo(this.world, target, player.side))) player.events.push(e);
+        const mine = "source" in e && e.source === player.dotId;
+        if (mine || (target && isVisibleTo(this.world, target, player.side))) player.events.push(e);
       }
     }
 

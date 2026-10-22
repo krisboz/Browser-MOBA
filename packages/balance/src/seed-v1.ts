@@ -4,7 +4,7 @@ import type { BalanceData } from "./schema.js";
 // Values marked "placeholder" are not decided yet; see "Decisions needed" in docs/v0-build-plan.md.
 // Block fields are a first sketch; M3 gives each block kind a strict schema.
 
-const damage = (base: number, ratio = 0.6) => ({ kind: "damage", base, ratio });
+const damage = (base: number, ratio = 0.6) => ({ kind: "damage" as const, base, ratio });
 
 export const seedV1: BalanceData = {
   dot: {
@@ -89,46 +89,48 @@ export const seedV1: BalanceData = {
   // placeholder: just past the middle, where walking across the lane misses both brush patches and the outcrop
   dummy: { x: 1650, y: 300, patrolHalfSpan: 200 },
   abilities: [
-    // Q
+    // Q: main damage
     {
       id: "bolt", name: "Bolt", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
-      blocks: [{ kind: "projectile", hits: "first", speed: 1400, range: 900, width: 30, onHit: [damage(120)] }],
+      blocks: [{ kind: "projectile", hits: "first", falloffAfterFirst: 0, returns: false, speed: 1400, range: 900, width: 30, onHit: [damage(120)] }],
     },
     {
       id: "heavy-strike", name: "Heavy Strike", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0,
       blocks: [{ kind: "empoweredAuto", duration: 4, resetAttackTimer: true, onHit: [damage(120)] }],
     },
     {
-      id: "piercer", name: "Piercer", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0.25,
-      blocks: [{ kind: "projectile", hits: "pierce", falloffAfterFirst: 0.5, speed: 1000, range: 1000, width: 40, onHit: [damage(120)] }],
+      id: "piercer", name: "Piercer", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0.3,
+      blocks: [{ kind: "projectile", hits: "pierce", falloffAfterFirst: 0.5, returns: false, speed: 1000, range: 1000, width: 40, onHit: [damage(120)] }],
     },
     {
       id: "burst", name: "Burst", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
-      blocks: [{ kind: "area", timing: "delayed", delay: 0.8, castRange: 800, radius: 120, onHit: [damage(120)] }],
+      blocks: [{ kind: "area", timing: "delayed", delay: 0.8, duration: 0, castRange: 800, radius: 120, onHit: [damage(120)], whileInside: [] }],
     },
     {
       id: "boomerang", name: "Boomerang", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
-      blocks: [{ kind: "projectile", hits: "pierce", returns: true, speed: 1100, range: 800, width: 40, onHit: [damage(80)] }],
+      blocks: [{ kind: "projectile", hits: "pierce", falloffAfterFirst: 0, returns: true, speed: 1100, range: 800, width: 40, onHit: [damage(80)] }],
     },
     {
       id: "mark", name: "Mark", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0,
       blocks: [
-        { kind: "empoweredAuto", duration: 4, resetAttackTimer: false, onHit: [{ kind: "applyMark", mark: "mark" }] },
-        { kind: "markStacks", mark: "mark", hitsToDetonate: 3, duration: 4, onDetonate: [damage(120)] },
+        {
+          kind: "empoweredAuto", duration: 4, resetAttackTimer: false,
+          onHit: [{ kind: "applyMark", hitsToDetonate: 3, duration: 5, onDetonate: [damage(120)] }],
+        },
       ],
     },
-    // W
+    // W: defence and utility
     {
       id: "chill-field", name: "Chill Field", slot: "W", type: "magic", cost: 0, cooldown: 12, windUp: 0.25,
-      blocks: [{ kind: "area", timing: "lasting", duration: 3, castRange: 700, radius: 200, onEnter: [damage(100)], whileInside: [{ kind: "slow", amount: 0.3 }] }],
+      blocks: [{ kind: "area", timing: "lasting", delay: 0, duration: 3, castRange: 700, radius: 200, onHit: [damage(100)], whileInside: [{ kind: "slow", amount: 0.3, duration: 0.1 }] }],
     },
     {
       id: "frenzy", name: "Frenzy", slot: "W", type: "none", cost: 0, cooldown: 12, windUp: 0,
-      blocks: [{ kind: "buff", duration: 4, stats: { attackSpeed: 0.5 } }],
+      blocks: [{ kind: "buff", duration: 4, fades: false, stats: { attackSpeed: 0.5 } }],
     },
     {
       id: "spell-shield", name: "Spell Shield", slot: "W", type: "none", cost: 0, cooldown: 14, windUp: 0,
-      blocks: [{ kind: "shield", blocks: "nextSpell", duration: 1.5 }],
+      blocks: [{ kind: "shield", blocks: "nextSpell", amount: 0, duration: 1.5 }],
     },
     {
       id: "vanish", name: "Vanish", slot: "W", type: "none", cost: 0, cooldown: 30, windUp: 0,
@@ -138,48 +140,58 @@ export const seedV1: BalanceData = {
       id: "trap", name: "Trap", slot: "W", type: "none", cost: 0, cooldown: 12, windUp: 0.25,
       blocks: [{ kind: "placed", castRange: 400, radius: 40, lifetime: 30, onEnter: [{ kind: "root", duration: 1.25 }] }],
     },
-    // E
+    // E: mobility and crowd control
     {
       id: "dash", name: "Dash", slot: "E", type: "none", cost: 0, cooldown: 10, windUp: 0,
-      blocks: [{ kind: "move", style: "dash", distance: 300, speed: 1200, crossesWalls: false }],
+      blocks: [{ kind: "move", style: "dash", distance: 300, speed: 1200, crossesWalls: false, onLand: [] }],
     },
     {
       id: "snare-shot", name: "Snare Shot", slot: "E", type: "magic", cost: 0, cooldown: 12, windUp: 0.25,
-      blocks: [{ kind: "projectile", hits: "first", speed: 1300, range: 900, width: 30, onHit: [damage(100), { kind: "root", duration: 1.5 }] }],
+      blocks: [{ kind: "projectile", hits: "first", falloffAfterFirst: 0, returns: false, speed: 1300, range: 900, width: 30, onHit: [damage(100), { kind: "root", duration: 1.5 }] }],
     },
     {
       id: "reel", name: "Reel", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.25,
-      blocks: [{ kind: "projectile", hits: "first", speed: 1300, range: 800, width: 35, anchorsThrower: true, retractSpeed: 1600, onHit: [damage(100), { kind: "pull" }] }],
+      blocks: [{ kind: "hook", speed: 1300, range: 800, width: 35, retractSpeed: 1600, onHit: [damage(100)] }],
     },
     {
       id: "shove", name: "Shove", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.15,
-      blocks: [{ kind: "area", timing: "instant", castRange: 0, radius: 160, onHit: [damage(60), { kind: "knockback", distance: 300, speed: 1500 }] }],
+      blocks: [{ kind: "area", timing: "instant", delay: 0, duration: 0, castRange: 0, radius: 160, onHit: [damage(60), { kind: "knockback", distance: 300, speed: 1500 }], whileInside: [] }],
     },
     {
       id: "leap", name: "Leap", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.15,
-      blocks: [{ kind: "move", style: "leap", distance: 450, speed: 900, crossesWalls: false, onLand: [{ kind: "area", timing: "instant", castRange: 0, radius: 120, onHit: [damage(100)] }] }],
+      blocks: [
+        {
+          kind: "move", style: "leap", distance: 450, speed: 900, crossesWalls: false,
+          onLand: [{ kind: "area", timing: "instant", delay: 0, duration: 0, castRange: 0, radius: 120, onHit: [damage(100)], whileInside: [] }],
+        },
+      ],
     },
-    // R
+    // R: ultimates
     {
       id: "dome", name: "Dome", slot: "R", type: "none", cost: 0, cooldown: 50, windUp: 0.25,
       blocks: [{ kind: "zone", radius: 350, expandTime: 0.5, duration: 4, pushesEnemiesOut: true, blocksSpellsFromOutside: true }],
     },
     {
       id: "artillery", name: "Artillery", slot: "R", type: "magic", cost: 0, cooldown: 50, windUp: 0.25,
-      blocks: [{ kind: "channel", selfRoot: true, duration: 3, shots: 5, shot: { kind: "area", timing: "delayed", delay: 0.6, castRange: 1600, radius: 150, onHit: [damage(80, 0.2)] } }],
+      blocks: [
+        {
+          kind: "channel", duration: 4, shots: 5, shotInterval: 0.5,
+          shot: { kind: "area", timing: "delayed", delay: 0.6, duration: 0, castRange: 1600, radius: 150, onHit: [damage(80, 0.2)], whileInside: [] },
+        },
+      ],
     },
     {
       id: "finisher", name: "Finisher", slot: "R", type: "physical", cost: 0, cooldown: 50, windUp: 0.35,
-      blocks: [{ kind: "area", timing: "instant", castRange: 150, radius: 100, onHit: [{ kind: "damage", base: 320, ratio: 0.6, missingHealthBonus: 1 }] }],
+      blocks: [{ kind: "area", timing: "instant", delay: 0, duration: 0, castRange: 150, radius: 100, onHit: [{ kind: "damage", base: 320, ratio: 0.6, missingHealthBonus: 1 }], whileInside: [] }],
     },
     {
       id: "overdrive", name: "Overdrive", slot: "R", type: "none", cost: 0, cooldown: 50, windUp: 0,
-      blocks: [{ kind: "buff", duration: 5, stats: { attackSpeed: 1, moveSpeedPct: 0.3 } }],
+      blocks: [{ kind: "buff", duration: 5, fades: false, stats: { attackSpeed: 1, moveSpeedPct: 0.3 } }],
     },
   ],
   // All summoner numbers are placeholders.
   summoners: [
-    { id: "flash", name: "Flash", cost: 0, cooldown: 120, windUp: 0, blocks: [{ kind: "move", style: "blink", distance: 400, crossesWalls: true }] },
+    { id: "flash", name: "Flash", cost: 0, cooldown: 120, windUp: 0, blocks: [{ kind: "move", style: "blink", distance: 400, speed: 1, crossesWalls: true, onLand: [] }] },
     { id: "heal", name: "Heal", cost: 0, cooldown: 120, windUp: 0, blocks: [{ kind: "heal", amount: 250 }] },
     { id: "barrier", name: "Barrier", cost: 0, cooldown: 120, windUp: 0, blocks: [{ kind: "shield", blocks: "damage", amount: 300, duration: 2 }] },
     { id: "cleanse", name: "Cleanse", cost: 0, cooldown: 120, windUp: 0, blocks: [{ kind: "cleanse" }] },

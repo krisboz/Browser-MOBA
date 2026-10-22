@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useRef, type CSSProperties, type ReactNode } fro
 import { createRoot } from "react-dom/client";
 import { serverUrl } from "./config.js";
 import { Game } from "./game/game.js";
-import { hudActions, hudStore, useHud } from "./store.js";
+import { hudActions, hudStore, useHud, type HudState } from "./store.js";
 
 const PING_OPTIONS = [0, 80, 150, 250];
 const SIDE_NAMES = ["Blue", "Red"];
@@ -44,6 +44,39 @@ function switchPreset(id: string) {
 
 const row: CSSProperties = { marginTop: 6, pointerEvents: "auto" };
 
+function AbilityBar({ abilities }: { abilities: HudState["abilities"] }) {
+  return (
+    <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6, pointerEvents: "none" }}>
+      {abilities.map((a, i) => {
+        const ready = a.cooldown <= 0;
+        return (
+          <div
+            key={a.slot}
+            style={{
+              width: 76,
+              height: 58,
+              marginLeft: i === 4 ? 14 : 0,
+              position: "relative",
+              overflow: "hidden",
+              background: "#1e272e",
+              border: `2px solid ${ready ? "#9fe870" : "#455a64"}`,
+              borderRadius: 6,
+              color: "#eceff1",
+              font: "11px ui-monospace, monospace",
+              textAlign: "center",
+            }}
+          >
+            {/* The dark overlay shrinks as the cooldown runs out. */}
+            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${ready ? 0 : (100 * a.cooldown) / a.max}%`, background: "rgba(0,0,0,0.55)" }} />
+            <div style={{ position: "relative", fontWeight: "bold", fontSize: 16, marginTop: 4 }}>{ready ? a.slot : Math.ceil(a.cooldown)}</div>
+            <div style={{ position: "relative", marginTop: 4 }}>{a.name}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Hud() {
   const hud = useHud();
   return (
@@ -75,8 +108,10 @@ function Hud() {
             <Button onClick={() => hudActions.dummy("patrol")}>patrol on/off</Button>
           </div>
         )}
-        <div style={{ marginTop: 6 }}>right click: walk or attack · S: stop (cancels a wind-up)</div>
+        <div style={{ marginTop: 6 }}>right click: walk or attack · Q W E R, D F: cast at the cursor · S: stop (cancels a wind-up)</div>
       </div>
+
+      <AbilityBar abilities={hud.abilities} />
 
       <div style={{ position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", font: "bold 22px ui-monospace, monospace", pointerEvents: "none" }}>
         <span style={{ color: "#4ea8ff" }}>{hud.score[0]}</span>

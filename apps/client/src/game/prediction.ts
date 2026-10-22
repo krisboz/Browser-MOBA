@@ -4,7 +4,13 @@ import { addDot, applyCommand, applySelfState, createWorld, removeDot, step, typ
 
 type CommandBody = Command extends infer C ? (C extends Command ? Omit<C, "tick"> : never) : never;
 
-const GHOST: Loadout = { preset: null, range: "ranged", points: {} };
+const GHOST: Loadout = {
+  preset: null,
+  range: "ranged",
+  points: {},
+  abilities: { Q: null, W: null, E: null, R: null },
+  summoners: [null, null],
+};
 
 /**
  * Runs your own dot ahead of the server with the shared rules, so a click moves it on the next frame.
@@ -46,6 +52,11 @@ export class Predictor {
     return this.dot.path;
   }
 
+  /** Your own dot as predicted: cooldowns, statuses and all. */
+  get self(): Dot {
+    return this.dot;
+  }
+
   /** Applies a command now and returns it tagged with this tick, ready to send. */
   issue(body: CommandBody): Command {
     const cmd = { ...body, tick: this.world.tick } as Command;
@@ -78,6 +89,9 @@ export class Predictor {
     this.world.score = [...snap.score];
     this.world.winner = snap.winner;
     this.world.projectiles = [];
+    this.world.spells = [];
+    // Events from local replays are never shown (the server's are); just don't let them pile up.
+    this.world.events = [];
 
     let next = 0;
     const applyDue = () => {
