@@ -1,0 +1,123 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import pg from "pg";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import WebSocket from "ws";
+import { PROTOCOL_VERSION, type ServerMessage } from "@moba/protocol";
+import { seedV1 } from "@moba/balance";
+import { BalanceLoadError } from "./balance-loader.js";
+import { loadConfig, type ServerConfig } from "./config.js";
+import { migrate } from "./db/migrate.js";
+import { seed } from "./db/seed.js";
+import { startServer, type RunningServer } from "./server.js";
+
+// Needs Postgres. CI provides it; locally, start it with `pnpm db:up` and set DATABASE_URL.
+const adminUrl = process.env.DATABASE_URL;
+
+describe.skipIf(!adminUrl)("server startup against Postgres", () => {
+  const admin = new pg.Pool({ connectionString: adminUrl });
+  const created: string[] = [];
+  let running: RunningServer | null = null;
+
+  /** A fresh, migrated database just for one test. */
+  async function freshDb(): Promise<{ url: string; pool: pg.Pool }> {
+    const name = `moba_test_${randomBytes(6).toString("hex")}`;
+    await admin.query(`CREATE DATABASE ${name}`);
+    created.push(name);
+    const url = new URL(adminUrl!);
+    url.pathname = `/${name}`;
+    const pool = new pg.Pool({ connectionString: url.toString() });
+    await migrate(pool);
+    return { url: url.toString(), pool };
+  }
+
+  const config = (databaseUrl: string): ServerConfig => ({ ...loadConfig({}), host: "127.0.0.1", port: 0, databaseUrl });
+
+  beforeAll(async () => {
+    await admin.query("SELECT 1");
+  });
+
+  afterEach(async () => {
+    await running?.close();
+    running = null;
+  });
+
+  afterAll(async () => {
+    for (const name of created) await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await admin.end();
+  });
+
+  it("loads version 1 and plays a move over the socket", async () => {
+    const { url, pool } = await freshDb();
+    expect(await seed(pool)).toBe(true);
+    expect(await seed(pool)).toBe(false); // idempotent
+    await pool.end();
+
+    running = await startServer(config(url));
+    expect(running.balanceVersion).toBe(1);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION }));
+
+    const welcome = await until(() => messages.find((m) => m.t === "welcome"));
+    expect(welcome).toMatchObject({ balanceVersion: 1, tickRate: 30 });
+    expect(welcome.t === "welcome" && welcome.balance).toEqual(seedV1);
+    const you = welcome.t === "welcome" ? welcome.you : "";
+
+    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "move", seq: 1, to: { x: 1000, y: 300 } } }));
+    const moved = await until(() =>
+      messages.find((m) => m.t === "snapshot" && m.snap.ackSeq === 1 && m.snap.dots.find((d) => d.id === you)!.x > 200),
+    );
+    expect(moved.t).toBe("snapshot");
+    ws.close();
+  });
+
+  it("refuses to start when the active record is invalid", async () => {
+    const { url, pool } = await freshDb();
+    const broken = { ...seedV1, dot: { ...seedV1.dot, moveSpeed: -1 } };
+    await pool.query("INSERT INTO balance_versions (data, is_active) VALUES ($1, true)", [JSON.stringify(broken)]);
+    await pool.end();
+
+    await expect(startServer(config(url))).rejects.toThrow(BalanceLoadError);
+    await expect(startServer(config(url))).rejects.toThrow(/dot\.moveSpeed/);
+  });
+
+  it("refuses to start when there is no active version", async () => {
+    const { url, pool } = await freshDb();
+    await pool.end();
+    await expect(startServer(config(url))).rejects.toThrow(/no active balance version/);
+  });
+
+  it("exits with an error from the command line on an invalid record, without listening", async () => {
+    const { url, pool } = await freshDb();
+    await pool.query("INSERT INTO balance_versions (data, is_active) VALUES ($1, true)", [JSON.stringify({ nonsense: true })]);
+    await pool.end();
+
+    const main = fileURLToPath(new URL("./main.ts", import.meta.url));
+    const child = spawn(process.execPath, ["--import", "tsx", main], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: { ...process.env, DATABASE_URL: url, HOST: "127.0.0.1", PORT: "0" },
+    });
+    let output = "";
+    child.stdout.on("data", (d) => (output += d));
+    child.stderr.on("data", (d) => (output += d));
+    const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+    expect(code).toBe(1);
+    expect(output).toMatch(/refused to start/);
+    expect(output).not.toMatch(/listening/);
+  });
+});
+
+async function until<T>(find: () => T | undefined, timeoutMs = 3000): Promise<T> {
+  const start = Date.now();
+  for (;;) {
+    const found = find();
+    if (found) return found;
+    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}

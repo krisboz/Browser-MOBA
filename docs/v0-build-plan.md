@@ -93,8 +93,8 @@ Seven milestones, in order: M0 → M1 → M2 → M3 → M4 → gate → M6, with
 
 Workspace, strict TypeScript, Vite + React client, Node ws server, Postgres in docker-compose with migrations, CI running typecheck and tests. Balance schema with the v0 numbers seeded as version 1. Server address read from config.
 
-- [ ] A dot moves at 300 units/s and covers the same distance in 10 s on a 60 Hz and a 144 Hz monitor.
-- [ ] The server loads version 1 from Postgres and refuses to start on an invalid record.
+- [x] A dot moves at 300 units/s and covers the same distance in 10 s on a 60 Hz and a 144 Hz monitor.
+- [x] The server loads version 1 from Postgres and refuses to start on an invalid record.
 
 ### M1: Movement and map
 
@@ -213,6 +213,10 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Dome edge cases (continuous push against a hook across its edge) | M3 | No special handling; let the blocks interact, jank accepted |
 | Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
+| Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); in M0 any button moves |
+| Ranged auto speed and tower shot speed | M2 | 1200 units/s for both |
+| Minion attack speed, ranges, movement speed and size; when the first wave spawns | M4 | 1 attack/s; melee range 100, ranged 400; 240 units/s; radius 20; first wave at 5 s |
+| Base depth, brush shapes, tower size | M1 | Bases 300 deep; two 200 × 160 brush patches at the midpoint, one against each edge; tower radius 50 |
 | Sim tick and snapshot rate | M0 | 30 ticks/s, 20 snapshots/s; revisit after M6 playtests |
 
 ## Risks

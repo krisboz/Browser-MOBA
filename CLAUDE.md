@@ -30,4 +30,12 @@ Work one milestone at a time, in the plan's order. A milestone is done only when
 
 ## Commands
 
-To be filled in during M0 (install, start Postgres, dev, test, typecheck).
+Needs Node 22+ and pnpm 10. Copy `.env.example` to `.env` first; it holds the server address, ports and database URL.
+
+- `pnpm install`: install everything.
+- `pnpm db:up`: start Postgres in Docker (or point `DATABASE_URL` at any Postgres 16).
+- `pnpm db:migrate`: apply `db/migrations`.
+- `pnpm db:seed`: insert the v0 numbers as balance version 1, if no version exists yet.
+- `pnpm dev`: server on :8080 and client on http://localhost:5173 (`dev:server` / `dev:client` run one).
+- `pnpm typecheck`: strict TypeScript across every package.
+- `pnpm test`: all tests. The Postgres tests run only when `DATABASE_URL` is set; each makes and drops its own database.
