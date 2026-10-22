@@ -13,9 +13,18 @@ export interface HudState {
   correction: number;
   /** Dev lag switch: extra round-trip delay in ms. */
   addedPing: number;
+  preset: string | null;
+  presets: string[];
+  mySide: 0 | 1 | null;
+  score: [number, number];
+  winner: 0 | 1 | null;
+  /** Seconds until you respawn, while dead. */
+  respawnIn: number | null;
+  hasDummy: boolean;
 }
 
-const initialPing = Number(new URLSearchParams(location.search).get("ping")) || 0;
+const params = new URLSearchParams(location.search);
+export const urlPreset = params.get("preset") ?? undefined;
 
 let state: HudState = {
   status: "connecting",
@@ -25,7 +34,14 @@ let state: HudState = {
   position: null,
   rtt: 0,
   correction: 0,
-  addedPing: initialPing,
+  addedPing: Number(params.get("ping")) || 0,
+  preset: null,
+  presets: [],
+  mySide: null,
+  score: [0, 0],
+  winner: null,
+  respawnIn: null,
+  hasDummy: false,
 };
 const listeners = new Set<() => void>();
 
@@ -39,6 +55,11 @@ export const hudStore = {
     listeners.add(listener);
     return () => listeners.delete(listener);
   },
+};
+
+/** Actions the HUD can ask of the game. The game fills these in when it starts. */
+export const hudActions = {
+  dummy: (_action: "reset" | "patrol") => {},
 };
 
 export const useHud = () => useSyncExternalStore(hudStore.subscribe, hudStore.get);

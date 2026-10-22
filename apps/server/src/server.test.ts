@@ -122,6 +122,53 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
     ws.close();
   });
 
+  it("puts a target dummy on the other side, and lets the player attack it", async () => {
+    const { url, pool } = await freshDb();
+    await seed(pool);
+    await pool.end();
+    running = await startServer(config(url));
+
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION, preset: "marksman" }));
+    const welcome = await until(() => messages.find((m) => m.t === "welcome"));
+    expect(welcome).toMatchObject({ side: 0, loadout: { preset: "marksman", range: "ranged" } });
+
+    const withDummy = await until(() => messages.find((m) => m.t === "snapshot" && m.snap.dots.some((d) => d.dummy)));
+    const dummy = withDummy.t === "snapshot" ? withDummy.snap.dots.find((d) => d.dummy)! : null;
+    expect(dummy).toMatchObject({ side: 1, x: seedV1.dummy.x, y: seedV1.dummy.y, health: 1000 });
+
+    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: 1, tick: 0, target: dummy!.id } }));
+    const hit = await until(
+      () => messages.flatMap((m) => (m.t === "snapshot" ? m.snap.events : [])).find((e) => e.kind === "hit"),
+      15_000,
+    );
+    // Marksman has 8 attack points: 140 damage into a dummy with no armor.
+    expect(hit).toMatchObject({ target: dummy!.id, amount: 140 });
+
+    ws.send(JSON.stringify({ t: "dummy", action: "reset" }));
+    await until(() => {
+      const last = messages.filter((m) => m.t === "snapshot").at(-1);
+      return last?.t === "snapshot" && last.snap.dots.find((d) => d.dummy)?.health === 1000 ? true : undefined;
+    });
+    ws.close();
+  });
+
+  it("refuses an unknown preset", async () => {
+    const { url, pool } = await freshDb();
+    await seed(pool);
+    await pool.end();
+    running = await startServer(config(url));
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION, preset: "wizard" }));
+    expect(await until(() => messages.find((m) => m.t === "error"))).toMatchObject({ message: 'unknown preset "wizard"' });
+  });
+
   it("refuses to start when there is no active version", async () => {
     const { url, pool } = await freshDb();
     await pool.end();

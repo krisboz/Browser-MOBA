@@ -25,6 +25,9 @@ export const seedV1: BalanceData = {
     autoWindUpShare: 0.3,
     rangedAutoSpeed: 1200, // placeholder
     respawn: 6,
+    regenPerSecond: 0, // placeholder: no passive regen
+    baseHealPerSecond: 0.2, // placeholder: full health in 5 s at base
+    brushRevealAfterAttack: 1,
   },
   damage: { resistConstant: 100 },
   match: { killsToWin: 5 },
@@ -83,6 +86,8 @@ export const seedV1: BalanceData = {
       { x: 1400, y: 440, w: 200, h: 160 },
     ],
   },
+  // placeholder: just past the middle, where walking across the lane misses both brush patches and the outcrop
+  dummy: { x: 1650, y: 300, patrolHalfSpan: 200 },
   abilities: [
     // Q
     {

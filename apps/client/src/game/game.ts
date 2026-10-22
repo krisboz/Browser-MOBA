@@ -1,25 +1,30 @@
 import type { BalanceData } from "@moba/balance";
-import type { ServerMessage, Side } from "@moba/protocol";
+import type { DotSnapshot, GameEvent, Loadout, ServerMessage, Side } from "@moba/protocol";
 import { createWorld, FixedStepper, inRect, type MapGeometry } from "@moba/sim";
-import { hudStore } from "../store.js";
+import { hudActions, hudStore, urlPreset } from "../store.js";
 import { ClockSync } from "./clock.js";
 import { SnapshotBuffer } from "./interpolation.js";
 import { Net } from "./net.js";
 import { Predictor } from "./prediction.js";
-import { Renderer, type ClickMarker, type Vec } from "./renderer.js";
+import { Renderer, type ClickMarker, type DrawnDot, type FloatingNumber, type Vec } from "./renderer.js";
 
 // Other dots are drawn two snapshot intervals in the past so there is almost always a snapshot on each side.
 const INTERP_DELAY = 0.1;
 const MARKER_LIFETIME = 0.4;
+const NUMBER_LIFETIME = 0.9;
 const PING_INTERVAL = 0.5;
 // Beyond this many ticks off, the prediction clock jumps instead of easing back.
 const MAX_CLOCK_DRIFT = 6;
+// Extra slack around a dot for clicking on it, in pixels.
+const CLICK_SLOP = 10;
 
 interface Session {
   balance: BalanceData;
   geometry: MapGeometry;
+  tickRate: number;
   you: string;
   side: Side;
+  loadout: Loadout;
   buffer: SnapshotBuffer;
 }
 
@@ -38,6 +43,11 @@ export class Game {
   private lastPing = -Infinity;
   private marker: ClickMarker | null = null;
   private mouse: Vec | null = null;
+  /** Hits waiting for the drawn time to reach them, then floating. */
+  private pendingHits: Extract<GameEvent, { kind: "hit" }>[] = [];
+  private numbers: FloatingNumber[] = [];
+  /** Enemies as last drawn, for clicking on them. */
+  private drawnEnemies: DotSnapshot[] = [];
   private frame = 0;
   private lastFrame = 0;
   private fpsFrames = 0;
@@ -49,13 +59,15 @@ export class Game {
   constructor(canvas: HTMLCanvasElement, serverUrl: string) {
     this.renderer = new Renderer(canvas);
     this.renderer.resize();
-    this.net = new Net(serverUrl, {
+    this.net = new Net(serverUrl, urlPreset, {
       onMessage: (msg) => this.onMessage(msg),
       onClose: () => hudStore.set({ status: "disconnected" }),
     });
     this.net.addedPing = hudStore.get().addedPing;
     this.cleanup.push(hudStore.subscribe(() => (this.net.addedPing = hudStore.get().addedPing)));
+    hudActions.dummy = (action) => this.net.dummy(action);
     this.listen(window, "resize", () => this.renderer.resize());
+    this.listen(window, "keydown", (e) => this.onKey(e as KeyboardEvent));
     this.listen(canvas, "contextmenu", (e) => e.preventDefault());
     this.listen(canvas, "mousedown", (e) => this.onClick(e as MouseEvent));
     this.listen(canvas, "mousemove", (e) => (this.mouse = { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY }));
@@ -72,6 +84,7 @@ export class Game {
       predicting: this.predictor !== null,
       tick: this.predictor?.tick ?? null,
       server: this.session?.buffer.latest?.self ?? null,
+      enemies: this.drawnEnemies,
     };
   }
 
@@ -92,9 +105,22 @@ export class Game {
       case "welcome": {
         // The server already validated this record; it is the pinned version for this room.
         const balance = msg.balance as BalanceData;
-        const geometry = createWorld(balance).geometry;
-        this.session = { balance, geometry, you: msg.you, side: msg.side, buffer: new SnapshotBuffer(msg.tickRate, INTERP_DELAY) };
-        hudStore.set({ status: "connected", balanceVersion: msg.balanceVersion });
+        this.session = {
+          balance,
+          geometry: createWorld(balance).geometry,
+          tickRate: msg.tickRate,
+          you: msg.you,
+          side: msg.side,
+          loadout: msg.loadout,
+          buffer: new SnapshotBuffer(msg.tickRate, INTERP_DELAY),
+        };
+        hudStore.set({
+          status: "connected",
+          balanceVersion: msg.balanceVersion,
+          preset: msg.loadout.preset,
+          presets: balance.presets.map((p) => p.id),
+          mySide: msg.side,
+        });
         // A few quick pings so prediction can start straight away.
         for (let i = 0; i < 3; i++) this.sendPing(now);
         break;
@@ -109,14 +135,21 @@ export class Game {
       case "snapshot": {
         const s = this.session;
         if (!s) return;
-        s.buffer.push(msg.snap, now);
-        const self = msg.snap.self;
-        if (!self) return;
+        const snap = msg.snap;
+        s.buffer.push(snap, now);
+        for (const e of snap.events) if (e.kind === "hit") this.pendingHits.push(e);
+        hudStore.set({
+          score: snap.score,
+          winner: snap.winner,
+          respawnIn: snap.self && !snap.self.alive ? Math.ceil(snap.self.respawnIn) : null,
+          hasDummy: snap.dots.some((d) => d.dummy),
+        });
+        if (!snap.self) return;
         if (!this.predictor && this.clock.ready) {
-          this.predictor = new Predictor(s.balance, s.you, s.side, Math.round(this.clock.targetTick(now)), self);
+          this.predictor = new Predictor(s.balance, s.you, s.side, s.loadout, Math.round(this.clock.targetTick(now)), snap.self);
         }
         if (this.predictor) {
-          this.predictor.reconcile(msg.snap);
+          this.predictor.reconcile(snap);
           this.worstCorrection = Math.max(this.worstCorrection, this.predictor.lastCorrection);
         }
         break;
@@ -134,13 +167,44 @@ export class Game {
     this.lastPing = now;
   }
 
-  private onClick(e: MouseEvent): void {
-    // Any button moves for now; M2 splits clicking an enemy (attack) from clicking the ground (move).
-    const to = this.renderer.screenToWorld({ x: e.clientX, y: e.clientY });
+  private send(body: { type: "move"; to: Vec } | { type: "attack"; target: string } | { type: "stop" }): void {
     const seq = ++this.seq;
-    // Before the clock has synced there is nothing to predict with; the server applies an untimed move at once.
-    this.net.command(this.predictor ? this.predictor.issue({ type: "move", seq, to }) : { type: "move", seq, tick: 0, to });
+    // Before the clock has synced there is nothing to predict with; the server applies an untimed command at once.
+    this.net.command(this.predictor ? this.predictor.issue({ ...body, seq }) : { ...body, seq, tick: 0 });
+  }
+
+  private enemyAt(screen: Vec): DotSnapshot | null {
+    const s = this.session;
+    if (!s) return null;
+    const p = this.renderer.screenToWorld(screen);
+    let best: DotSnapshot | null = null;
+    let bestDist = s.balance.dot.radius + CLICK_SLOP;
+    for (const d of this.drawnEnemies) {
+      const dd = Math.hypot(d.x - p.x, d.y - p.y);
+      if (dd <= bestDist) {
+        best = d;
+        bestDist = dd;
+      }
+    }
+    return best;
+  }
+
+  private onClick(e: MouseEvent): void {
+    // Right click: attack the enemy under the cursor, or walk. Left click does the same until M3 claims it for aiming.
+    if (e.button !== 0 && e.button !== 2) return;
+    const enemy = this.enemyAt({ x: e.clientX, y: e.clientY });
+    if (enemy) {
+      this.send({ type: "attack", target: enemy.id });
+      return;
+    }
+    const to = this.renderer.screenToWorld({ x: e.clientX, y: e.clientY });
+    this.send({ type: "move", to });
     this.marker = { pos: to, age: 0 };
+  }
+
+  private onKey(e: KeyboardEvent): void {
+    if (e.repeat) return;
+    if (e.key === "s" || e.key === "S") this.send({ type: "stop" });
   }
 
   private loop(timeMs: number): void {
@@ -157,7 +221,7 @@ export class Game {
 
     const s = this.session;
     const p = this.predictor;
-    let self: { pos: Vec; path: readonly Vec[] } | null = null;
+    let selfPos: Vec | null = null;
     if (p) {
       // Keep the prediction clock at the tick the server will be on when our commands arrive:
       // ease towards it by running slightly fast or slow, or jump when it is far off.
@@ -169,33 +233,20 @@ export class Game {
         const rate = 1 + Math.min(Math.max(drift * 0.05, -0.2), 0.2);
         this.alpha = this.stepper.advance(dt * rate, () => p.step());
       }
-      self = { pos: p.renderPos(this.alpha, dt), path: p.path };
-    } else if (s) {
-      const fromServer = s.buffer.latest?.self;
-      if (fromServer) self = { pos: fromServer, path: fromServer.path };
+      selfPos = p.renderPos(this.alpha, dt);
+    } else if (s?.buffer.latest?.self) {
+      selfPos = s.buffer.latest.self;
     }
+    this.lastSelf = selfPos && { ...selfPos };
 
-    this.lastSelf = self && { ...self.pos };
-    if (s) {
-      const others = s.buffer.sample(now).filter((d) => d.id !== s.you);
-      if (self) this.renderer.followCamera(self.pos, dt);
-      const inBrush = self ? s.geometry.brush.some((b) => inRect(self.pos, b)) : false;
-      this.renderer.draw({
-        balance: s.balance,
-        geometry: s.geometry,
-        others,
-        self: self && { ...self, side: s.side, inBrush },
-        marker: this.marker,
-        mouse: this.mouse,
-      });
-    }
+    if (s) this.draw(s, now, dt, selfPos);
 
     this.fpsFrames++;
     const frameTime = timeMs / 1000;
     if (frameTime - this.fpsSince >= 0.5) {
       hudStore.set({
         fps: Math.round(this.fpsFrames / (frameTime - this.fpsSince)),
-        position: self ? { x: Math.round(self.pos.x), y: Math.round(self.pos.y) } : null,
+        position: selfPos ? { x: Math.round(selfPos.x), y: Math.round(selfPos.y) } : null,
         rtt: Math.round(this.clock.rtt * 1000),
         correction: Math.round(this.worstCorrection * 10) / 10,
       });
@@ -203,5 +254,54 @@ export class Game {
       this.fpsSince = frameTime;
       this.worstCorrection = 0;
     }
+  }
+
+  private draw(s: Session, now: number, dt: number, selfPos: Vec | null): void {
+    const sample = s.buffer.sample(now);
+    const hovered = this.mouse ? this.enemyAt(this.mouse)?.id : undefined;
+    const inBrush = (pos: Vec) => s.geometry.brush.some((b) => inRect(pos, b));
+    const sinceRelease = (tick: number) => (tick < 0 ? null : sample.time - tick / s.tickRate);
+
+    const dots: DrawnDot[] = [];
+    for (const d of sample.dots) {
+      if (!d.alive) continue;
+      const isSelf = d.id === s.you;
+      const pos = isSelf && selfPos ? selfPos : d;
+      dots.push({
+        pos,
+        side: d.side,
+        // Your own facing follows your prediction while walking, the server while winding up.
+        facing: isSelf && this.predictor && d.windUp === null ? this.predictor.facing : d.facing,
+        health: d.health,
+        maxHealth: d.maxHealth,
+        windUp: d.windUp,
+        sinceRelease: sinceRelease(d.lastReleaseTick),
+        isSelf,
+        inBrush: inBrush(pos),
+        dummy: d.dummy,
+        hovered: d.id === hovered,
+      });
+    }
+    this.drawnEnemies = sample.dots.filter((d) => d.alive && d.side !== s.side);
+    if (selfPos) this.renderer.followCamera(selfPos, dt);
+
+    // Damage numbers appear when the drawn time reaches the hit, so they line up with the hit on screen.
+    const due = this.pendingHits.filter((h) => h.tick / s.tickRate <= sample.time);
+    this.pendingHits = this.pendingHits.filter((h) => h.tick / s.tickRate > sample.time);
+    for (const h of due) this.numbers.push({ x: h.x, y: h.y, amount: h.amount, age: 0 });
+    for (const n of this.numbers) n.age += dt;
+    this.numbers = this.numbers.filter((n) => n.age < NUMBER_LIFETIME);
+
+    this.renderer.draw({
+      balance: s.balance,
+      geometry: s.geometry,
+      dots,
+      projectiles: sample.projectiles,
+      path: this.predictor?.path ?? [],
+      pathFrom: selfPos,
+      numbers: this.numbers,
+      marker: this.marker,
+      mouse: this.mouse,
+    });
   }
 }

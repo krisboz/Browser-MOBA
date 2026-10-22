@@ -1,11 +1,16 @@
 import type { BalanceData } from "@moba/balance";
-import type { Command, Side, Snapshot } from "@moba/protocol";
-import { addDot, applyCommand, createWorld, step, type Dot, type Vec, type World } from "@moba/sim";
+import type { Command, Loadout, SelfState, Side, Snapshot } from "@moba/protocol";
+import { addDot, applyCommand, applySelfState, createWorld, removeDot, step, type Dot, type Vec, type World } from "@moba/sim";
+
+type CommandBody = Command extends infer C ? (C extends Command ? Omit<C, "tick"> : never) : never;
+
+const GHOST: Loadout = { preset: null, range: "ranged", points: {} };
 
 /**
  * Runs your own dot ahead of the server with the shared rules, so a click moves it on the next frame.
  * Each snapshot resets it to the server's state and replays the commands the server hasn't applied yet.
- * Only your own movement is predicted; everything else waits for the server.
+ * Other visible dots are copied in as still "ghosts", so chasing an attack target walks the right way.
+ * Only your own movement is drawn from here; wind-ups, hits and everyone else come from the server.
  */
 export class Predictor {
   readonly world: World;
@@ -17,11 +22,12 @@ export class Predictor {
   /** Size of the last correction, in units. 0 when the prediction was right. */
   lastCorrection = 0;
 
-  constructor(balance: BalanceData, readonly dotId: string, side: Side, tick: number, pos: Vec) {
+  constructor(balance: BalanceData, readonly dotId: string, side: Side, loadout: Loadout, tick: number, self: SelfState) {
     this.world = createWorld(balance);
     this.world.tick = tick;
-    this.dot = addDot(this.world, dotId, side, pos);
-    this.prev = { ...pos };
+    this.dot = addDot(this.world, { id: dotId, side, loadout });
+    applySelfState(this.dot, self);
+    this.prev = { ...this.dot.pos };
   }
 
   get tick(): number {
@@ -32,13 +38,17 @@ export class Predictor {
     return this.dot.pos;
   }
 
+  get facing(): number {
+    return this.dot.facing;
+  }
+
   get path(): readonly Vec[] {
     return this.dot.path;
   }
 
   /** Applies a command now and returns it tagged with this tick, ready to send. */
-  issue(body: { type: "move"; seq: number; to: Vec }): Command {
-    const cmd: Command = { ...body, tick: this.world.tick };
+  issue(body: CommandBody): Command {
+    const cmd = { ...body, tick: this.world.tick } as Command;
     this.pending.push(cmd);
     applyCommand(this.world, this.dotId, cmd);
     return cmd;
@@ -62,9 +72,13 @@ export class Predictor {
     const until = Math.max(this.world.tick, snap.tick);
     const replayed = until > snap.tick;
 
-    this.dot.pos = { x: snap.self.x, y: snap.self.y };
-    this.dot.path = snap.self.path.map((p) => ({ ...p }));
+    this.syncGhosts(snap);
+    applySelfState(this.dot, snap.self);
     this.world.tick = snap.tick;
+    this.world.score = [...snap.score];
+    this.world.winner = snap.winner;
+    this.world.projectiles = [];
+
     let next = 0;
     const applyDue = () => {
       while (next < this.pending.length && this.pending[next]!.tick <= this.world.tick) {
@@ -85,6 +99,25 @@ export class Predictor {
     this.offset = { x: this.offset.x + error.x, y: this.offset.y + error.y };
     // With nothing replayed, `prev` is still from the old timeline; shift it by the same correction.
     if (!replayed) this.prev = { x: prevBefore.x - error.x, y: prevBefore.y - error.y };
+  }
+
+  private syncGhosts(snap: Snapshot): void {
+    const seen = new Set<string>([this.dotId]);
+    for (const d of snap.dots) {
+      if (d.id === this.dotId) continue;
+      seen.add(d.id);
+      const ghost = this.world.dots.get(d.id) ?? addDot(this.world, { id: d.id, side: d.side, loadout: GHOST, dummy: d.dummy });
+      ghost.pos = { x: d.x, y: d.y };
+      ghost.path = [];
+      ghost.patrol = null;
+      ghost.attackTarget = null;
+      ghost.windUp = null;
+      ghost.alive = d.alive;
+      ghost.health = d.health;
+      ghost.stats.maxHealth = d.maxHealth;
+      ghost.revealedFor = 0;
+    }
+    for (const id of [...this.world.dots.keys()]) if (!seen.has(id)) removeDot(this.world, id);
   }
 
   /** Where to draw the dot: between the last two ticks, plus whatever correction is still fading. */

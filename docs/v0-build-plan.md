@@ -107,8 +107,8 @@ Lane map data, nav grid, A* with smoothing, click-to-move, camera, click marker,
 
 Stats from base + points, the damage formula, death and 6 s respawn, first to 5. Arm animation: wind-up length scales with attack speed, cancel before release, ranged autos home, melee autos land at release. Target dummy with damage numbers, health reset and patrol.
 
-- [ ] Two vanilla dots trade autos for about 10 s to a kill (1000 health, 100 attack, 1 attack/s).
-- [ ] A cancelled wind-up fires nothing; a released auto lands even if the attacker dies or moves.
+- [x] Two vanilla dots trade autos for about 10 s to a kill (1000 health, 100 attack, 1 attack/s).
+- [x] A cancelled wind-up fires nothing; a released auto lands even if the attacker dies or moves.
 
 ### M3: Spells and summoners
 
@@ -198,7 +198,7 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | --- | --- | --- |
 | Wind-up length at 1.0 attacks/s, and for spells | M2 | Auto wind-up 30% of the attack interval; spells a flat 0.25 s |
 | Dot radius, and whether dots and minions block each other | M1 | Radius 30; no body blocking in v0 |
-| Health regeneration and base healing | M2 | No passive regen; standing in your own base heals fast. Decides how strong poke is, so test both |
+| Health regeneration and base healing | M2 | No passive regen; standing in your own base heals 20% of max health per second. Decides how strong poke is, so test both |
 | Brush: does attacking from brush reveal you? | M2 | Yes, for 1 s after any auto or cast |
 | Share of attack / magic attack added to spells | M3 | One ratio per spell in data, start at 0.6 |
 | Ranges, projectile speeds, CC durations, slow %, shield sizes | M3 | First pass derived from the balance targets, tuned in M5 |
@@ -213,7 +213,12 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Dome edge cases (continuous push against a hook across its edge) | M3 | No special handling; let the blocks interact, jank accepted |
 | Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
-| Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); in M0 any button moves |
+| Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); S stops. Left click does the same as right until M3 uses it for aiming |
+| Clicking an enemy: one auto, or keep attacking? | M2 | Keep attacking until another command, League style; a dot never picks a target by itself. The order lapses if the target dies or goes out of sight |
+| Does cancelling a wind-up cost the attack? | M2 | No: the attack timer is refunded, so you can attack again at once |
+| Where the target dummy stands, and what it is | M2 | A vanilla ranged dot at x 1650, y 300 (past the middle, clear of brush), patrolling 200 either side across the lane; respawns on its spot. Present while only one person is in the room |
+| Choosing a preset in v0 | M2 | `?preset=` in the URL or the HUD buttons, until v0.1's pick screen; `vanilla` and `vanilla-melee` for testing |
+| After a win | M2 | The next match starts in the same room 5 s later, and a room that empties starts fresh; M4 adds the match record |
 | Ranged auto speed and tower shot speed | M2 | 1200 units/s for both |
 | Minion attack speed, ranges, movement speed and size; when the first wave spawns | M4 | 1 attack/s; melee range 100, ranged 400; 240 units/s; radius 20; first wave at 5 s |
 | Where towers stand | M1 | 700 units from each end of the lane, so with range 500 a 600-unit stretch in the middle is out of both towers' reach |

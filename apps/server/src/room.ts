@@ -1,10 +1,28 @@
-import { PROTOCOL_VERSION, parseClientMessage, type Command, type ServerMessage, type Side } from "@moba/protocol";
-import { addDot, applyCommand, createWorld, FixedStepper, removeDot, snapshot, step, TICK_RATE, type World } from "@moba/sim";
+import { PROTOCOL_VERSION, parseClientMessage, type Command, type GameEvent, type ServerMessage, type Side } from "@moba/protocol";
+import {
+  addDot,
+  applyCommand,
+  createWorld,
+  FixedStepper,
+  isVisibleTo,
+  loadoutFor,
+  removeDot,
+  resetHealth,
+  resetMatch,
+  setPatrol,
+  snapshot,
+  step,
+  TICK_RATE,
+  type World,
+} from "@moba/sim";
 import type { WebSocket } from "ws";
 import type { BalanceVersion } from "./balance-loader.js";
 
 // A command may be tagged at most this far ahead of the server, so a client can't queue moves for later.
 const MAX_LEAD_TICKS = TICK_RATE;
+// After a win, the next match starts this many seconds later.
+const RESTART_AFTER = 5;
+const DUMMY_ID = "dummy";
 
 interface Player {
   dotId: string;
@@ -12,6 +30,8 @@ interface Player {
   /** Commands waiting for their tick, in arrival order. */
   queue: Command[];
   ackSeq: number;
+  /** Events since this player's last snapshot. */
+  events: GameEvent[];
 }
 
 /** One authoritative match. Pins its balance version for its whole life. */
@@ -23,6 +43,7 @@ export class Room {
   private lastTime = 0;
   private nextSnapshotTick = 0;
   private nextDotId = 1;
+  private restartIn: number | null = null;
 
   constructor(
     private readonly balance: BalanceVersion,
@@ -59,15 +80,23 @@ export class Room {
           ws.close();
           return;
         }
-        const side: Side = this.players.size % 2 === 0 ? 0 : 1;
+        const loadout = loadoutFor(this.world.balance, msg.preset);
+        if (!loadout) {
+          this.send(ws, { t: "error", message: `unknown preset "${msg.preset}"` });
+          ws.close();
+          return;
+        }
+        const side: Side = [...this.players.values()].some((p) => p.side === 0) ? 1 : 0;
         const dotId = `p${this.nextDotId++}`;
-        addDot(this.world, dotId, side);
-        this.players.set(ws, { dotId, side, queue: [], ackSeq: 0 });
+        addDot(this.world, { id: dotId, side, loadout });
+        this.players.set(ws, { dotId, side, queue: [], ackSeq: 0, events: [] });
+        this.updateDummy();
         this.send(ws, {
           t: "welcome",
           protocol: PROTOCOL_VERSION,
           you: dotId,
           side,
+          loadout,
           tick: this.world.tick,
           tickRate: TICK_RATE,
           balanceVersion: this.balance.id,
@@ -78,6 +107,13 @@ export class Room {
       case "ping":
         this.send(ws, { t: "pong", id: msg.id, tick: this.world.tick });
         return;
+      case "dummy": {
+        const dummy = this.world.dots.get(DUMMY_ID);
+        if (!player || !dummy) return;
+        if (msg.action === "reset") resetHealth(dummy);
+        else setPatrol(this.world, dummy, !dummy.patrol);
+        return;
+      }
       case "cmd":
         if (!player || msg.cmd.seq <= player.ackSeq) return;
         player.queue.push({ ...msg.cmd, tick: Math.min(msg.cmd.tick, this.world.tick + MAX_LEAD_TICKS) });
@@ -90,6 +126,24 @@ export class Room {
     if (!player) return;
     removeDot(this.world, player.dotId);
     this.players.delete(ws);
+    // Nobody left: whoever comes next starts a fresh match.
+    if (!this.players.size) {
+      this.restartIn = null;
+      resetMatch(this.world);
+    }
+    this.updateDummy();
+  }
+
+  /** The target dummy stands in for the other side while only one person is here. */
+  private updateDummy(): void {
+    const sides = new Set([...this.players.values()].map((p) => p.side));
+    const dummy = this.world.dots.get(DUMMY_ID);
+    const wanted = sides.size === 1 ? ((1 - [...sides][0]!) as Side) : null;
+    if (dummy && dummy.side !== wanted) removeDot(this.world, DUMMY_ID);
+    if (wanted !== null && (!dummy || dummy.side !== wanted)) {
+      const { x, y } = this.world.balance.dummy;
+      addDot(this.world, { id: DUMMY_ID, side: wanted, loadout: loadoutFor(this.world.balance, "vanilla")!, pos: { x, y }, dummy: true });
+    }
   }
 
   private update(): void {
@@ -111,10 +165,27 @@ export class Room {
       }
     }
     step(this.world);
+    for (const player of this.players.values()) {
+      for (const e of this.world.events) {
+        const target = this.world.dots.get(e.target);
+        if (e.source === player.dotId || (target && isVisibleTo(this.world, target, player.side))) player.events.push(e);
+      }
+    }
+
+    if (this.world.winner !== null) {
+      this.restartIn ??= RESTART_AFTER;
+      this.restartIn -= 1 / TICK_RATE;
+      if (this.restartIn <= 0) {
+        this.restartIn = null;
+        resetMatch(this.world);
+      }
+    }
+
     if (this.world.tick >= this.nextSnapshotTick) {
       this.nextSnapshotTick += TICK_RATE / this.snapshotRate;
       for (const [ws, player] of this.players) {
-        this.send(ws, { t: "snapshot", snap: snapshot(this.world, player, player.ackSeq) });
+        this.send(ws, { t: "snapshot", snap: snapshot(this.world, player, player.ackSeq, player.events) });
+        player.events = [];
       }
     }
   }

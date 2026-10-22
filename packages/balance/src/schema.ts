@@ -104,6 +104,12 @@ export const balanceSchema = z
         autoWindUpShare: share,
         rangedAutoSpeed: pos,
         respawn: nonNeg,
+        /** Health regained per second anywhere, as a flat amount. */
+        regenPerSecond: nonNeg,
+        /** Share of max health regained per second while standing in your own base. */
+        baseHealPerSecond: share,
+        /** Seconds a dot stays visible from brush after releasing an attack. */
+        brushRevealAfterAttack: nonNeg,
       })
       .strict(),
     damage: z.object({ resistConstant: pos }).strict(),
@@ -154,6 +160,15 @@ export const balanceSchema = z
         brush: z.array(rect),
       })
       .strict(),
+    dummy: z
+      .object({
+        /** Where the target dummy stands and respawns. */
+        x: nonNeg,
+        y: nonNeg,
+        /** When patrolling it walks this far either side of its spot, across the lane. */
+        patrolHalfSpan: nonNeg,
+      })
+      .strict(),
     abilities: z.array(ability).min(1),
     summoners: z.array(summoner).min(1),
     presets: z.array(preset).min(1),
@@ -178,6 +193,7 @@ export const balanceSchema = z
 
     if (b.dot.moveSpeedCap < b.dot.moveSpeed) fail(["dot", "moveSpeedCap"], "cap is below base movement speed");
     if (b.levels.ultimateUnlockLevel > b.levels.maxLevel) fail(["levels", "ultimateUnlockLevel"], "above max level");
+    if (b.dummy.x > b.map.length || b.dummy.y > b.map.width) fail(["dummy"], "outside the map");
     if (b.map.towerDistanceFromEnd * 2 >= b.map.length) fail(["map", "towerDistanceFromEnd"], "towers overlap");
     for (const key of ["walls", "brush"] as const) {
       b.map[key].forEach((r, i) => {

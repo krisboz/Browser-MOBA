@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seedV1 } from "@moba/balance";
 import { addDot, applyCommand, createWorld, dist, findPath, isClear, isSegmentClear, step, TICK_RATE, validateMap, type Vec } from "./index.js";
+import { VANILLA } from "./test-helpers.js";
 
 const r = seedV1.dot.radius;
 
@@ -18,7 +19,7 @@ describe("pathing on the lane map", () => {
   const [blue, red] = world.geometry.spawns;
 
   it("walks base to base around every obstacle with one click", () => {
-    const dot = addDot(world, "a", 0);
+    const dot = addDot(world, { id: "a", side: 0, loadout: VANILLA });
     applyCommand(world, "a", { type: "move", seq: 1, tick: 0, to: red });
     assertWalkable(world, blue, dot.path);
 

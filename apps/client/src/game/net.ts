@@ -13,9 +13,11 @@ export class Net {
   private readonly ws: WebSocket;
   addedPing = 0;
 
-  constructor(url: string, private readonly handlers: NetHandlers) {
+  constructor(url: string, preset: string | undefined, private readonly handlers: NetHandlers) {
     this.ws = new WebSocket(url);
-    this.ws.addEventListener("open", () => this.ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION })));
+    this.ws.addEventListener("open", () =>
+      this.ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION, ...(preset ? { preset } : {}) })),
+    );
     this.ws.addEventListener("message", (e) => {
       const msg = JSON.parse(String(e.data)) as ServerMessage;
       this.later(() => this.handlers.onMessage(msg));
@@ -29,6 +31,10 @@ export class Net {
 
   ping(id: number): void {
     this.send({ t: "ping", id });
+  }
+
+  dummy(action: "reset" | "patrol"): void {
+    this.send({ t: "dummy", action });
   }
 
   close(): void {

@@ -13,3 +13,11 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage('{"t":"cmd","cmd":{"type":"move","seq":1,"tick":0,"to":{"x":1e999,"y":0}}}')).toBeNull();
   });
 });
+
+describe("attack and stop commands", () => {
+  it("accepts them with a target and a tick", () => {
+    expect(parseClientMessage(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: 2, tick: 9, target: "p2" } }))).not.toBeNull();
+    expect(parseClientMessage(JSON.stringify({ t: "cmd", cmd: { type: "stop", seq: 3, tick: 9 } }))).not.toBeNull();
+    expect(parseClientMessage(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: 2, tick: 9, target: "" } }))).toBeNull();
+  });
+});

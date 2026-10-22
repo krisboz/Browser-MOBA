@@ -7,9 +7,9 @@ export function brushOf(world: World, dot: Dot): number {
   return world.geometry.brush.findIndex((b) => inRect(dot.pos, b));
 }
 
-/** A dot in brush is hidden from the other side unless one of their dots stands in the same patch. */
+/** A dot in brush is hidden from the other side unless one of their dots stands in the same patch, or it just attacked. */
 export function isVisibleTo(world: World, dot: Dot, viewer: Side): boolean {
-  if (dot.side === viewer) return true;
+  if (dot.side === viewer || dot.revealedFor > 0) return true;
   const patch = brushOf(world, dot);
   if (patch < 0) return true;
   for (const other of world.dots.values()) {
