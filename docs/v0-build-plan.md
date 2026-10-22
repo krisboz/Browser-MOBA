@@ -63,7 +63,7 @@ The sim runs on the server from the first milestone, even against the dummy on l
 
 Key choices:
 
-- **Fixed tick.** The sim steps at 30 ticks per second. All balance durations are stored in seconds and converted once when a version loads. Rendering runs at monitor rate and interpolates between snapshots.
+- **Fixed tick.** The sim steps at 30 ticks per second. All balance durations are stored in seconds, and timers count down in seconds by the fixed step (1/30 s), so nothing is rounded to whole ticks. Rendering runs at monitor rate and interpolates between snapshots.
 - **Commands in, snapshots out.** The client sends commands (move to point, attack target, cast slot at aim point, cancel, buy item). The server sends 20 snapshots per second. Nothing about the match is decided in the browser.
 - **Prediction only where it matters.** Own movement is predicted and reconciled, because snappy movement is the core feel. Wind-ups, casts and hits wait for the server.
 - **One balance version per match.** The server pins the active version when the room starts and sends it to both clients, so both run the same definitions.
@@ -98,7 +98,7 @@ Workspace, strict TypeScript, Vite + React client, Node ws server, Postgres in d
 
 ### M1: Movement and map
 
-Lane map data, nav grid, A* with smoothing, click-to-move, camera, click marker, cursor. Brush as a vision rule in the sim: a dot inside brush is left out of the other side's snapshot. Latency switch.
+Lane map data, nav grid, A* with smoothing, click-to-move, camera, click marker, cursor. Brush as a vision rule in the sim: a dot inside brush is left out of the other side's snapshot. Latency switch. Own-movement prediction and reconciliation, so snappy movement is tested against lag from the start.
 
 - [ ] A dot walks base to base around every obstacle with one click.
 - [ ] Movement still feels snappy with 80 ms of added latency.
@@ -116,7 +116,7 @@ Statuses and forced movement first, then the skill blocks, then the 16 abilities
 
 - [ ] Every preset can cast its full kit against the dummy.
 - [ ] Scenario tests pass: double hook drags both, Flash while anchored drags the victim, root blocks Dash/Leap/Flash only, newest forced movement wins, Dome blocks spells cast from outside and keeps those cast inside.
-- [ ] A full round of spells takes more than half of a vanilla dot's health.
+- [ ] A full round of spells from Poke or Diver takes more than half of a vanilla dot's health. Tank and Marksman are tuned in M5.
 
 ### M4: Lane and match
 
@@ -136,7 +136,7 @@ The owner dashboard: edit any balance value, apply as a new version with a note,
 
 ### M6: Two players over a link
 
-Room ids in the URL, second human joins, own-movement prediction and reconciliation, snapshot interpolation for everything else, disconnect handling. Deploy one server in Frankfurt.
+Room ids in the URL, second human joins, snapshot interpolation for everything else, disconnect handling. Deploy one server in Frankfurt.
 
 - [ ] Two people on different home networks finish a match from a shared link.
 - [ ] Both clients agree on every hit and kill; the record lists both players with their preset and stats.
@@ -207,6 +207,11 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Does levelling scale damage? | M4 | No in v0; cooldown cut only |
 | Comeback multiplier on experience, and less gold for the leader | M4 | No; kill gold multiplier only, as in the notes |
 | Last-hit gold when a tower or minion gets the kill | M4 | Nobody gets it |
+| How experience is earned from minions | M4 | Last hit only, like gold: missed minions give nothing, so the level 2 to 3 first item needs near-perfect farming |
+| Starting gold | M4 | 0 |
+| Attack range: measured how? | M2 | From the attacker's centre to the target's edge |
+| Dome edge cases (continuous push against a hook across its edge) | M3 | No special handling; let the blocks interact, jank accepted |
+| Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
 | Sim tick and snapshot rate | M0 | 30 ticks/s, 20 snapshots/s; revisit after M6 playtests |
 
@@ -215,7 +220,7 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 The biggest risk is M3: the interaction rules are where a prototype quietly turns into special cases.
 
 - **Interaction rules turn into special cases.** Build statuses and forced movement as one system before any ability, and write the scenario tests from the notes first. A failing scenario is fixed in a block, never in an ability.
-- **Snappy movement dies under latency.** Predict own movement from M6 but test with the latency switch from M1, and run one test from Munich to a Frankfurt server before M6 starts.
+- **Snappy movement dies under latency.** Predict own movement and test with the latency switch from M1, and run one test from Munich to a Frankfurt server before M6 starts.
 - **Scope.** 16 abilities, 5 summoners, minions, towers and a shop is a lot for a prototype. If M3 runs long, finish Poke and Diver first: between them they cover projectile, area, dash, leap, empowered auto, buff, self-root channel and execute, which is most of the block set.
 - **Over-building the data layer.** Keep the block set to what the presets need and the dashboard to a validated JSON editor; a nicer editor waits for v0.1.
 - **Readability.** Arms, homing autos and spell effects all compete on a small dot. Review a recorded match at normal speed after M3, before effects multiply.

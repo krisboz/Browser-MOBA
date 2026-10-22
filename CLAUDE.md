@@ -13,7 +13,7 @@ Work one milestone at a time, in the plan's order. A milestone is done only when
 
 - **Rules live in one place.** All game rules live in `packages/sim`, shared by server and client. Never duplicate a rule in the client or the server.
 - **The server is authoritative.** The client sends commands and renders snapshots. It predicts only its own movement. Nothing about a match is decided in the browser.
-- **Fixed tick.** The sim steps at 30 ticks per second. Never count frames. Durations are stored in seconds and converted when a balance version loads. Game speed must not depend on monitor refresh rate.
+- **Fixed tick.** The sim steps at 30 ticks per second. Never count frames. Durations are stored in seconds and timers count down by the fixed step, never rounded to whole ticks. Game speed must not depend on monitor refresh rate.
 - **Balance is data, never code.** Every number for stats, abilities, summoners, items, minions, towers, gold, levels and the map comes from the active balance version in Postgres. If you need a number that isn't decided, add it to the balance data with a placeholder value and list it under "Decisions needed" in the plan.
 - **Abilities are built from blocks.** Every ability and summoner is data built from coded blocks (projectile, area, dash, pull, root, shield and so on). A new interaction means a new block, never a special case inside one ability. No pair of abilities gets a special rule.
 - **Test the interaction rules.** Every rule in "Interaction rules" in the design notes gets a scenario test in `packages/sim`, written before the abilities that rely on it.
