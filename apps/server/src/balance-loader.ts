@@ -1,4 +1,5 @@
 import { parseBalance, type BalanceData } from "@moba/balance";
+import { validateMap } from "@moba/sim";
 import type pg from "pg";
 
 export interface BalanceVersion {
@@ -16,8 +17,9 @@ export async function loadActiveBalance(pool: pg.Pool): Promise<BalanceVersion> 
   const row = rows[0];
   if (!row) throw new BalanceLoadError("no active balance version (run pnpm db:seed)");
   const result = parseBalance(row.data);
-  if (!result.ok) {
-    throw new BalanceLoadError(`balance version ${row.id} is invalid:\n  ${result.issues.join("\n  ")}`);
+  const issues = result.ok ? validateMap(result.data) : result.issues;
+  if (!result.ok || issues.length) {
+    throw new BalanceLoadError(`balance version ${row.id} is invalid:\n  ${issues.join("\n  ")}`);
   }
   return { id: row.id, data: result.data };
 }

@@ -148,7 +148,9 @@ export const balanceSchema = z
         length: pos,
         width: pos,
         baseDepth: pos,
-        towerDistanceFromBase: pos,
+        /** From each end of the lane to that side's tower. */
+        towerDistanceFromEnd: pos,
+        walls: z.array(rect),
         brush: z.array(rect),
       })
       .strict(),
@@ -176,7 +178,12 @@ export const balanceSchema = z
 
     if (b.dot.moveSpeedCap < b.dot.moveSpeed) fail(["dot", "moveSpeedCap"], "cap is below base movement speed");
     if (b.levels.ultimateUnlockLevel > b.levels.maxLevel) fail(["levels", "ultimateUnlockLevel"], "above max level");
-    if (b.map.towerDistanceFromBase * 2 >= b.map.length) fail(["map", "towerDistanceFromBase"], "towers overlap");
+    if (b.map.towerDistanceFromEnd * 2 >= b.map.length) fail(["map", "towerDistanceFromEnd"], "towers overlap");
+    for (const key of ["walls", "brush"] as const) {
+      b.map[key].forEach((r, i) => {
+        if (r.x < 0 || r.y < 0 || r.x + r.w > b.map.length || r.y + r.h > b.map.width) fail(["map", key, i], "outside the map");
+      });
+    }
 
     const abilities = new Map(b.abilities.map((a) => [a.id, a]));
     const summoners = new Set(b.summoners.map((s) => s.id));

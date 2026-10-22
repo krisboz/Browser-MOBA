@@ -1,31 +1,49 @@
-import { PROTOCOL_VERSION, type Command, type ServerMessage } from "@moba/protocol";
-
-type CommandBody = Command extends infer C ? (C extends Command ? Omit<C, "seq"> : never) : never;
+import { PROTOCOL_VERSION, type ClientMessage, type Command, type ServerMessage } from "@moba/protocol";
 
 export interface NetHandlers {
   onMessage(msg: ServerMessage): void;
   onClose(): void;
 }
 
-/** The socket to the authoritative server. Sends commands, hands every server message to the game. */
+/**
+ * The socket to the authoritative server.
+ * `addedPing` is the dev lag switch: it holds every message for half of it in each direction.
+ */
 export class Net {
   private readonly ws: WebSocket;
-  private seq = 0;
+  addedPing = 0;
 
-  constructor(url: string, handlers: NetHandlers) {
+  constructor(url: string, private readonly handlers: NetHandlers) {
     this.ws = new WebSocket(url);
     this.ws.addEventListener("open", () => this.ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION })));
-    this.ws.addEventListener("message", (e) => handlers.onMessage(JSON.parse(String(e.data)) as ServerMessage));
-    this.ws.addEventListener("close", () => handlers.onClose());
+    this.ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data)) as ServerMessage;
+      this.later(() => this.handlers.onMessage(msg));
+    });
+    this.ws.addEventListener("close", () => this.handlers.onClose());
   }
 
-  send(body: CommandBody): void {
-    if (this.ws.readyState !== WebSocket.OPEN) return;
-    const cmd = { ...body, seq: ++this.seq } as Command;
-    this.ws.send(JSON.stringify({ t: "cmd", cmd }));
+  command(cmd: Command): void {
+    this.send({ t: "cmd", cmd });
+  }
+
+  ping(id: number): void {
+    this.send({ t: "ping", id });
   }
 
   close(): void {
     this.ws.close();
+  }
+
+  private send(msg: ClientMessage): void {
+    const raw = JSON.stringify(msg);
+    this.later(() => {
+      if (this.ws.readyState === WebSocket.OPEN) this.ws.send(raw);
+    });
+  }
+
+  private later(fn: () => void): void {
+    if (this.addedPing > 0) setTimeout(fn, this.addedPing / 2);
+    else fn();
   }
 }

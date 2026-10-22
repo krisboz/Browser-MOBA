@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { seedV1 } from "@moba/balance";
 import { addDot, applyCommand, createWorld, FixedStepper, step, TICK_RATE } from "./index.js";
 
-// A lane long enough that 10 s of walking never reaches the end.
-const balance = { ...seedV1, map: { ...seedV1.map, length: 10_000 } };
+// An open lane long enough that 10 s of walking never reaches the end. The walk runs along y = 100, clear of the towers.
+const balance = { ...seedV1, map: { ...seedV1.map, length: 10_000, walls: [] } };
 
 /** Walks a dot toward the far end for `seconds`, driving the sim from render frames of `frameTime` seconds. */
 function walk(frameTimes: () => number, seconds: number) {
   const world = createWorld(balance);
-  const dot = addDot(world, "a", 0, { x: 100, y: 300 });
-  applyCommand(world, "a", { type: "move", seq: 1, to: { x: 9_900, y: 300 } });
+  const dot = addDot(world, "a", 0, { x: 100, y: 100 });
+  applyCommand(world, "a", { type: "move", seq: 1, tick: 0, to: { x: 9_900, y: 100 } });
   const stepper = new FixedStepper();
   let t = 0;
   while (t < seconds - 1e-9) {
@@ -43,17 +43,17 @@ describe("movement over fixed ticks", () => {
 
   it("stops exactly on the target", () => {
     const world = createWorld(balance);
-    const dot = addDot(world, "a", 0, { x: 100, y: 300 });
-    applyCommand(world, "a", { type: "move", seq: 1, to: { x: 145, y: 300 } });
+    const dot = addDot(world, "a", 0, { x: 100, y: 100 });
+    applyCommand(world, "a", { type: "move", seq: 1, tick: 0, to: { x: 145, y: 100 } });
     for (let i = 0; i < 30; i++) step(world);
-    expect(dot.pos).toEqual({ x: 145, y: 300 });
-    expect(dot.moveTarget).toBeNull();
+    expect(dot.pos).toEqual({ x: 145, y: 100 });
+    expect(dot.path).toEqual([]);
   });
 
   it("keeps move targets inside the lane", () => {
     const world = createWorld(seedV1);
     addDot(world, "a", 0);
-    applyCommand(world, "a", { type: "move", seq: 1, to: { x: -500, y: 99_999 } });
-    expect(world.dots.get("a")!.moveTarget).toEqual({ x: seedV1.dot.radius, y: seedV1.map.width - seedV1.dot.radius });
+    applyCommand(world, "a", { type: "move", seq: 1, tick: 0, to: { x: 100, y: 99_999 } });
+    expect(world.dots.get("a")!.path.at(-1)).toEqual({ x: 100, y: seedV1.map.width - seedV1.dot.radius });
   });
 });

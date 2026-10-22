@@ -68,7 +68,7 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
     expect(welcome.t === "welcome" && welcome.balance).toEqual(seedV1);
     const you = welcome.t === "welcome" ? welcome.you : "";
 
-    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "move", seq: 1, to: { x: 1000, y: 300 } } }));
+    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "move", seq: 1, tick: 0, to: { x: 600, y: 120 } } }));
     const moved = await until(() =>
       messages.find((m) => m.t === "snapshot" && m.snap.ackSeq === 1 && m.snap.dots.find((d) => d.id === you)!.x > 200),
     );
@@ -84,6 +84,42 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
 
     await expect(startServer(config(url))).rejects.toThrow(BalanceLoadError);
     await expect(startServer(config(url))).rejects.toThrow(/dot\.moveSpeed/);
+  });
+
+  it("refuses to start when the map has no way from base to base", async () => {
+    const { url, pool } = await freshDb();
+    const walled = { ...seedV1, map: { ...seedV1.map, walls: [{ x: 1500, y: 0, w: 20, h: 600 }] } };
+    await pool.query("INSERT INTO balance_versions (data, is_active) VALUES ($1, true)", [JSON.stringify(walled)]);
+    await pool.end();
+    await expect(startServer(config(url))).rejects.toThrow(/no path from one base to the other/);
+  });
+
+  it("answers pings with its tick and applies commands on the tick they were tagged with", async () => {
+    const { url, pool } = await freshDb();
+    await seed(pool);
+    await pool.end();
+    running = await startServer(config(url));
+
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION }));
+    ws.send(JSON.stringify({ t: "ping", id: 7 }));
+    const pong = await until(() => messages.find((m) => m.t === "pong"));
+    expect(pong).toMatchObject({ id: 7 });
+    const now = pong.t === "pong" ? pong.tick : 0;
+
+    // Tagged 10 ticks ahead: no snapshot before that tick may show it applied.
+    const at = now + 10;
+    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "move", seq: 1, tick: at, to: { x: 600, y: 120 } } }));
+    const applied = await until(() => messages.find((m) => m.t === "snapshot" && m.snap.ackSeq === 1));
+    const snaps = messages.filter((m) => m.t === "snapshot").map((m) => (m.t === "snapshot" ? m.snap : null)!);
+    for (const s of snaps) {
+      if (s.tick <= at) expect(s.ackSeq).toBe(0);
+    }
+    expect(applied.t === "snapshot" && applied.snap.tick).toBeGreaterThan(at);
+    ws.close();
   });
 
   it("refuses to start when there is no active version", async () => {

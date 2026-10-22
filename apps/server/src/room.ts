@@ -1,10 +1,16 @@
-import { PROTOCOL_VERSION, parseClientMessage, type ServerMessage, type Side } from "@moba/protocol";
+import { PROTOCOL_VERSION, parseClientMessage, type Command, type ServerMessage, type Side } from "@moba/protocol";
 import { addDot, applyCommand, createWorld, FixedStepper, removeDot, snapshot, step, TICK_RATE, type World } from "@moba/sim";
 import type { WebSocket } from "ws";
 import type { BalanceVersion } from "./balance-loader.js";
 
+// A command may be tagged at most this far ahead of the server, so a client can't queue moves for later.
+const MAX_LEAD_TICKS = TICK_RATE;
+
 interface Player {
   dotId: string;
+  side: Side;
+  /** Commands waiting for their tick, in arrival order. */
+  queue: Command[];
   ackSeq: number;
 }
 
@@ -45,30 +51,38 @@ export class Room {
     const msg = parseClientMessage(raw);
     if (!msg) return; // Malformed input is dropped, never trusted.
     const player = this.players.get(ws);
-    if (msg.t === "hello") {
-      if (player) return;
-      if (msg.protocol !== PROTOCOL_VERSION) {
-        this.send(ws, { t: "error", message: `protocol ${msg.protocol} not supported, server speaks ${PROTOCOL_VERSION}` });
-        ws.close();
+    switch (msg.t) {
+      case "hello": {
+        if (player) return;
+        if (msg.protocol !== PROTOCOL_VERSION) {
+          this.send(ws, { t: "error", message: `protocol ${msg.protocol} not supported, server speaks ${PROTOCOL_VERSION}` });
+          ws.close();
+          return;
+        }
+        const side: Side = this.players.size % 2 === 0 ? 0 : 1;
+        const dotId = `p${this.nextDotId++}`;
+        addDot(this.world, dotId, side);
+        this.players.set(ws, { dotId, side, queue: [], ackSeq: 0 });
+        this.send(ws, {
+          t: "welcome",
+          protocol: PROTOCOL_VERSION,
+          you: dotId,
+          side,
+          tick: this.world.tick,
+          tickRate: TICK_RATE,
+          balanceVersion: this.balance.id,
+          balance: this.balance.data,
+        });
         return;
       }
-      const side: Side = this.players.size % 2 === 0 ? 0 : 1;
-      const dotId = `p${this.nextDotId++}`;
-      addDot(this.world, dotId, side);
-      this.players.set(ws, { dotId, ackSeq: 0 });
-      this.send(ws, {
-        t: "welcome",
-        protocol: PROTOCOL_VERSION,
-        you: dotId,
-        tickRate: TICK_RATE,
-        balanceVersion: this.balance.id,
-        balance: this.balance.data,
-      });
-      return;
+      case "ping":
+        this.send(ws, { t: "pong", id: msg.id, tick: this.world.tick });
+        return;
+      case "cmd":
+        if (!player || msg.cmd.seq <= player.ackSeq) return;
+        player.queue.push({ ...msg.cmd, tick: Math.min(msg.cmd.tick, this.world.tick + MAX_LEAD_TICKS) });
+        return;
     }
-    if (!player) return;
-    applyCommand(this.world, player.dotId, msg.cmd);
-    player.ackSeq = Math.max(player.ackSeq, msg.cmd.seq);
   }
 
   private leave(ws: WebSocket): void {
@@ -82,18 +96,26 @@ export class Room {
     const now = performance.now();
     const elapsed = (now - this.lastTime) / 1000;
     this.lastTime = now;
-    this.stepper.advance(elapsed, () => {
-      step(this.world);
-      if (this.world.tick >= this.nextSnapshotTick) {
-        this.nextSnapshotTick += TICK_RATE / this.snapshotRate;
-        this.broadcastSnapshot();
-      }
-    });
+    this.stepper.advance(elapsed, () => this.tick());
   }
 
-  private broadcastSnapshot(): void {
-    for (const [ws, player] of this.players) {
-      this.send(ws, { t: "snapshot", snap: snapshot(this.world, player.ackSeq) });
+  private tick(): void {
+    // Commands run on the tick they were tagged with; late ones run now, which the client's reconciliation absorbs.
+    for (const player of this.players.values()) {
+      const due = player.queue.filter((c) => c.tick <= this.world.tick);
+      if (!due.length) continue;
+      player.queue = player.queue.filter((c) => c.tick > this.world.tick);
+      for (const cmd of due) {
+        applyCommand(this.world, player.dotId, cmd);
+        player.ackSeq = Math.max(player.ackSeq, cmd.seq);
+      }
+    }
+    step(this.world);
+    if (this.world.tick >= this.nextSnapshotTick) {
+      this.nextSnapshotTick += TICK_RATE / this.snapshotRate;
+      for (const [ws, player] of this.players) {
+        this.send(ws, { t: "snapshot", snap: snapshot(this.world, player, player.ackSeq) });
+      }
     }
   }
 

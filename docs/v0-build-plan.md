@@ -100,8 +100,8 @@ Workspace, strict TypeScript, Vite + React client, Node ws server, Postgres in d
 
 Lane map data, nav grid, A* with smoothing, click-to-move, camera, click marker, cursor. Brush as a vision rule in the sim: a dot inside brush is left out of the other side's snapshot. Latency switch. Own-movement prediction and reconciliation, so snappy movement is tested against lag from the start.
 
-- [ ] A dot walks base to base around every obstacle with one click.
-- [ ] Movement still feels snappy with 80 ms of added latency.
+- [x] A dot walks base to base around every obstacle with one click.
+- [ ] Movement still feels snappy with 80 ms of added latency. (Measured in Chromium at +80 ms: the dot moves on the first frame after the click, as with no lag, and prediction needed no corrections even at +250 ms. Waiting on the owner's playtest.)
 
 ### M2: Autos and the dummy
 
@@ -199,7 +199,7 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Wind-up length at 1.0 attacks/s, and for spells | M2 | Auto wind-up 30% of the attack interval; spells a flat 0.25 s |
 | Dot radius, and whether dots and minions block each other | M1 | Radius 30; no body blocking in v0 |
 | Health regeneration and base healing | M2 | No passive regen; standing in your own base heals fast. Decides how strong poke is, so test both |
-| Brush: does attacking from brush reveal you? | M1 | Yes, for 1 s after any auto or cast |
+| Brush: does attacking from brush reveal you? | M2 | Yes, for 1 s after any auto or cast |
 | Share of attack / magic attack added to spells | M3 | One ratio per spell in data, start at 0.6 |
 | Ranges, projectile speeds, CC durations, slow %, shield sizes | M3 | First pass derived from the balance targets, tuned in M5 |
 | Summoner numbers (Flash distance, cooldowns, heal and barrier sizes) | M3 | First pass in data, tuned in M5 |
@@ -216,6 +216,9 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); in M0 any button moves |
 | Ranged auto speed and tower shot speed | M2 | 1200 units/s for both |
 | Minion attack speed, ranges, movement speed and size; when the first wave spawns | M4 | 1 attack/s; melee range 100, ranged 400; 240 units/s; radius 20; first wave at 5 s |
+| Where towers stand | M1 | 700 units from each end of the lane, so with range 500 a 600-unit stretch in the middle is out of both towers' reach |
+| Walls in the lane | M1 | A gate at each base mouth and one outcrop each side of the middle, point-symmetric; placeholders to test pathing |
+| Changing the balance schema once matches exist | M5 | A data migration adds a new version converted from the active one; `db:seed --force` only works before the first match |
 | Base depth, brush shapes, tower size | M1 | Bases 300 deep; two 200 × 160 brush patches at the midpoint, one against each edge; tower radius 50 |
 | Sim tick and snapshot rate | M0 | 30 ticks/s, 20 snapshots/s; revisit after M6 playtests |
 

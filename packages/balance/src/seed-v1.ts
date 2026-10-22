@@ -66,7 +66,17 @@ export const seedV1: BalanceData = {
     length: 3000,
     width: 600,
     baseDepth: 300, // placeholder
-    towerDistanceFromBase: 700,
+    towerDistanceFromEnd: 700,
+    // placeholder walls, point-symmetric so both sides get the same lane: a gate at each base mouth
+    // and one outcrop each side of the middle
+    walls: [
+      { x: 300, y: 0, w: 40, h: 150 },
+      { x: 300, y: 450, w: 40, h: 150 },
+      { x: 2660, y: 0, w: 40, h: 150 },
+      { x: 2660, y: 450, w: 40, h: 150 },
+      { x: 1150, y: 0, w: 150, h: 180 },
+      { x: 1700, y: 420, w: 150, h: 180 },
+    ],
     // placeholder shapes: one patch on each side of the lane at the midpoint
     brush: [
       { x: 1400, y: 0, w: 200, h: 160 },
