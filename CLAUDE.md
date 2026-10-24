@@ -9,6 +9,13 @@ A browser MOBA you can finish in 5 to 10 minutes: every player is a dot, a match
 
 Work one milestone at a time, in the plan's order. A milestone is done only when every checkbox under it passes. Tick the boxes in `docs/v0-build-plan.md` as they pass.
 
+## Where we are
+
+- **M0 to M3 are done** (foundations, movement and map, autos and the dummy, spells and summoners). Plus attack move on A.
+- **One box is still open in M1:** "Movement still feels snappy with 80 ms of added latency." It is measured (the dot moves on the first frame after a click at +80 ms, no prediction corrections even at +250 ms) but needs the owner's own playtest. Ask the owner how it felt, and tick it only on their word.
+- **Next: M4, lane and match** (minions, towers, levels, gold, shop, match record). Read the M4 section and the "Decisions needed" table in the plan before starting. Its rows for M4 already have proposed defaults: last-hit-only gold and experience, starting gold 0, levelling cuts cooldowns only, and the minion and tower placeholders.
+- **How the code is laid out:** game rules in `packages/sim` (`world.ts` steps the world; `combat.ts`, `spells.ts`, `statuses.ts` and `motion.ts` hold the rules; `interaction-rules.test.ts` holds a scenario per rule in the design notes). The numbers live in `packages/balance` (schema plus the version 1 seed); the server room is in `apps/server/src/room.ts`; client prediction is in `apps/client/src/game/prediction.ts`.
+
 ## Ground rules
 
 - **Rules live in one place.** All game rules live in `packages/sim`, shared by server and client. Never duplicate a rule in the client or the server.
@@ -27,15 +34,19 @@ Work one milestone at a time, in the plan's order. A milestone is done only when
 - Don't change `docs/design-notes.md` without asking. Propose changes instead.
 - Keep `pnpm typecheck` and `pnpm test` passing on every commit.
 - After each milestone, summarize what was built, what was assumed, and how to try it.
+- **Git: commit straight to `main` and push. No branches.** The owner works alone and undoes changes by going back to an earlier commit.
+- The owner is on Windows (PowerShell) and is new to pnpm and to running a database, so spell out setup steps.
+- Changing the shape of the balance data makes the version already in Postgres invalid, and the server then refuses to start (on purpose). Tell the owner to run `pnpm db:seed --force` and restart `pnpm dev` after pulling such a change. The server pins the balance version it loads at start-up, so it also needs a restart to pick up a reseed.
+- To check something in a browser without a person, dev builds expose `window.__moba` (the running `Game`; `debugState()` gives your dot, the prediction tick and visible enemies).
 
 ## Commands
 
 Needs Node 22+ and pnpm 10. Copy `.env.example` to `.env` first; it holds the server address, ports and database URL.
 
 - `pnpm install`: install everything.
-- `pnpm db:up`: start Postgres in Docker (or point `DATABASE_URL` at any Postgres 16).
+- `pnpm db:up`: start Postgres in Docker (or point `DATABASE_URL` at any Postgres 16). The owner's Windows PC runs PostgreSQL 16 installed directly, without Docker: their `.env` points `DATABASE_URL` at the `postgres` user and database, so `pnpm db:up` is skipped there.
 - `pnpm db:migrate`: apply `db/migrations`.
 - `pnpm db:seed`: insert the v0 numbers as balance version 1, if no version exists yet. `pnpm db:seed --force` replaces all versions (dev only, refused once matches exist); use it when the balance schema changes.
 - `pnpm dev`: server on :8080 and client on http://localhost:5173 (`dev:server` / `dev:client` run one). Add `?ping=80` to the URL, or use the HUD buttons, for the lag switch.
 - `pnpm typecheck`: strict TypeScript across every package.
-- `pnpm test`: all tests. The Postgres tests run only when `DATABASE_URL` is set; each makes and drops its own database.
+- `pnpm test`: all tests. The Postgres tests run only when `DATABASE_URL` is set (tests read it from `.env` too); each makes and drops its own database.
