@@ -36,7 +36,8 @@ Needs Node 22+ and pnpm 10. Copy `.env.example` to `.env` first; it holds the se
 - `pnpm db:up`: start Postgres in Docker (or point `DATABASE_URL` at any Postgres 16).
 - `pnpm db:migrate`: apply `db/migrations`.
 - `pnpm db:seed`: insert the v0 numbers as balance version 1, if no version exists yet. `pnpm db:seed --force` replaces all versions (dev only, refused once matches exist); use it when the balance schema changes.
-- `pnpm db:publish-seed "<note>"`: publish the seed's current numbers as a new active balance version, keeping the old ones for the matches that used them. The way to apply a number change until the M5 dashboard exists; restart the server to pick it up.
+- `pnpm dashboard`: the owner dashboard on http://localhost:5180 (API on :8081). Edit balance values, apply as a new version with a note, roll back. Running game servers switch to a new version at their next match.
+- `pnpm db:publish-seed "<note>"`: publish the seed's current numbers (`packages/balance/src/seed-v1.ts`) as a new active balance version, for numbers changed in code rather than in the dashboard.
 - `pnpm dev`: server on :8080 and client on http://localhost:5173 (`dev:server` / `dev:client` run one). Add `?ping=80` to the URL, or use the HUD buttons, for the lag switch.
 - `pnpm typecheck`: strict TypeScript across every package.
 - `pnpm test`: all tests. The Postgres tests run only when `DATABASE_URL` is set; each makes and drops its own database.

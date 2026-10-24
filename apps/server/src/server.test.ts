@@ -195,6 +195,62 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
     await pool.end();
   });
 
+  it("a version applied during a match takes over at the next one; each match's record carries its own", async () => {
+    const { url, pool } = await freshDb();
+    // One-kill matches against a dummy that one auto finishes.
+    const v1 = structuredClone(seedV1);
+    v1.match.killsToWin = 1;
+    v1.dot.stats.health.base = 50;
+    await pool.query("INSERT INTO balance_versions (note, data, is_active) VALUES ('v1', $1, true)", [JSON.stringify(v1)]);
+    running = await startServer({ ...config(url), balancePollMs: 100 });
+
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION, preset: "marksman" }));
+    await until(() => messages.find((m) => m.t === "welcome"));
+
+    // The owner applies a new version mid-match: Bolt hits harder.
+    const v2 = structuredClone(v1);
+    const bolt = v2.abilities.find((a) => a.id === "bolt")!.blocks[0]!;
+    if (bolt.kind === "projectile") bolt.onHit = [{ kind: "damage", base: 999, ratio: 0.6 }];
+    await pool.query("UPDATE balance_versions SET is_active = false");
+    const { rows } = await pool.query<{ id: number }>(
+      "INSERT INTO balance_versions (note, parent_id, data, is_active) VALUES ('bolt 999', 1, $1, true) RETURNING id",
+      [JSON.stringify(v2)],
+    );
+    const v2id = rows[0]!.id;
+    await new Promise((r) => setTimeout(r, 300)); // the server has seen it by now
+
+    let seq = 0;
+    const killDummy = async (after: number) => {
+      const snap = await until(() => messages.slice(after).find((m) => m.t === "snapshot" && m.snap.dots.some((d) => d.dummy && d.alive)));
+      const dummy = snap.t === "snapshot" ? snap.snap.dots.find((d) => d.dummy)! : null;
+      ws.send(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: ++seq, tick: 0, target: dummy!.id } }));
+      return until(() => messages.slice(after).find((m) => m.t === "snapshot" && m.snap.winner === 0), 15_000);
+    };
+
+    // The match in progress still runs on version 1.
+    await killDummy(0);
+    const recorded = async (n: number) =>
+      until(async () => {
+        const r = await pool.query<{ balance_version_id: number }>("SELECT balance_version_id FROM matches ORDER BY id");
+        return r.rows.length >= n ? r.rows.map((x) => x.balance_version_id) : undefined;
+      });
+    expect(await recorded(1)).toEqual([1]);
+
+    // The next match starts on version 2, with a fresh welcome carrying it.
+    const at = messages.length;
+    const second = await until(() => messages.slice(at).find((m) => m.t === "welcome"), 10_000);
+    expect(second).toMatchObject({ balanceVersion: v2id, loadout: { preset: "marksman" } });
+    expect(second.t === "welcome" && (second.balance as typeof v2).abilities.find((a) => a.id === "bolt")).toEqual(v2.abilities.find((a) => a.id === "bolt"));
+    await killDummy(messages.indexOf(second) + 1);
+    expect(await recorded(2)).toEqual([1, v2id]);
+    ws.close();
+    await pool.end();
+  }, 40_000);
+
   it("publishes changed seed numbers as a new active version, leaving the old one for its matches", async () => {
     const { url, pool } = await freshDb();
     const old = structuredClone(seedV1);

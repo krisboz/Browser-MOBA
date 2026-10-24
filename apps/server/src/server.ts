@@ -23,8 +23,27 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
     throw err;
   }
 
+  // Watch for a newly applied version; rooms take it up at their next match.
+  let latest = balance;
+  let polling = false;
+  const poll = setInterval(async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      const { rows } = await pool.query<{ id: number }>("SELECT id FROM balance_versions WHERE is_active");
+      if (rows[0] && rows[0].id !== latest.id) {
+        latest = await loadActiveBalance(pool);
+        console.log(`balance version ${latest.id} is active; new matches use it`);
+      }
+    } catch (err) {
+      console.error(`keeping balance version ${latest.id}: ${(err as Error).message}`);
+    } finally {
+      polling = false;
+    }
+  }, config.balancePollMs);
+
   // One room for everyone until M6 adds room ids in the URL.
-  const room = new Room(balance, config.snapshotRate, postgresRecorder(pool));
+  const room = new Room(balance, config.snapshotRate, postgresRecorder(pool), () => latest);
   room.start();
 
   const wss = new WebSocketServer({ host: config.host, port: config.port });
@@ -38,6 +57,7 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
     port: (wss.address() as AddressInfo).port,
     balanceVersion: balance.id,
     async close() {
+      clearInterval(poll);
       room.stop();
       for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));

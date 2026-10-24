@@ -4,7 +4,7 @@ import { ConfigError, loadConfig } from "./config.js";
 describe("loadConfig", () => {
   it("reads the address, port and database from the environment", () => {
     const config = loadConfig({ HOST: "127.0.0.1", PORT: "9001", DATABASE_URL: "postgres://x@db/y", SNAPSHOT_RATE: "10" });
-    expect(config).toEqual({ host: "127.0.0.1", port: 9001, databaseUrl: "postgres://x@db/y", snapshotRate: 10 });
+    expect(config).toEqual({ host: "127.0.0.1", port: 9001, databaseUrl: "postgres://x@db/y", snapshotRate: 10, balancePollMs: 5000 });
   });
 
   it("falls back to local defaults", () => {

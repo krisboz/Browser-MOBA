@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Balance Dashboard</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { --bg: #0e1116; --panel: #161c22; --line: #2c3a44; --text: #e3e9ec; --muted: #7f929c; --accent: #9fe870; --warn: #ffcc80; --bad: #ff8a80; }
+      * { box-sizing: border-box; }
+      html, body, #root { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+      h1 { font-size: 18px; margin: 0 0 12px; }
+      h2 { font-size: 14px; margin: 0 0 10px; }
+      h3 { font-size: 13px; margin: 14px 0 6px; }
+      .layout { display: grid; grid-template-columns: 240px 1fr 320px; height: 100%; }
+      aside, main { overflow-y: auto; padding: 16px; }
+      aside { background: var(--panel); border-right: 1px solid var(--line); }
+      aside.right { border-right: none; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+      .loading { padding: 24px; }
+      .muted { color: var(--muted); font-weight: normal; }
+      .badge { background: #2e4d22; color: var(--accent); border-radius: 3px; padding: 0 5px; margin-left: 6px; font-size: 11px; }
+      .ok { color: var(--accent); }
+      .error { color: var(--bad); }
+      button { font: inherit; cursor: pointer; background: #2e7d32; color: #fff; border: 1px solid #3f8f43; border-radius: 4px; padding: 6px 10px; }
+      button:disabled { background: #263238; border-color: var(--line); color: var(--muted); cursor: default; }
+      button.secondary { background: transparent; border-color: var(--line); color: var(--text); }
+      .version { display: block; width: 100%; text-align: left; background: transparent; border: 1px solid var(--line); margin-bottom: 6px; color: var(--text); }
+      .version.active { border-color: #3f8f43; }
+      .version.selected { background: #22303a; }
+      .version .note { margin: 2px 0; word-break: break-word; }
+      input, textarea { font: inherit; background: #0b0f13; color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; }
+      input.changed { border-color: var(--warn); color: var(--warn); }
+      input.bad { border-color: var(--bad); }
+      .search { width: 100%; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; }
+      .group h3 { cursor: pointer; user-select: none; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: 2px 8px 2px 0; vertical-align: middle; }
+      td.label { color: #b0c4cc; width: 55%; word-break: break-word; }
+      td input:not([type=checkbox]) { width: 140px; }
+      .tabs { margin-bottom: 10px; display: flex; gap: 4px; }
+      .tabs button { background: transparent; border-color: var(--line); color: var(--muted); }
+      .tabs button.on { color: var(--text); border-color: var(--accent); }
+      textarea { width: 100%; min-height: 70vh; }
+      textarea.noteBox { min-height: 70px; }
+      .changes { list-style: none; padding: 0; margin: 0; }
+      .changes li { padding: 3px 0; border-bottom: 1px dashed var(--line); word-break: break-word; }
+      .changes .label { color: #b0c4cc; display: block; }
+      .apply { display: flex; gap: 8px; margin-top: 12px; }
+      .apply input { flex: 1; }
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; height: auto; } aside { border: none; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/ui/main.tsx"></script>
+  </body>
+</html>

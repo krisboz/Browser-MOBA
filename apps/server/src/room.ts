@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PROTOCOL_VERSION, parseClientMessage, type Command, type GameEvent, type ServerMessage, type Side } from "@moba/protocol";
+import { PROTOCOL_VERSION, parseClientMessage, type Command, type GameEvent, type Loadout, type ServerMessage, type Side } from "@moba/protocol";
 import {
   addDot,
   applyCommand,
@@ -30,6 +30,8 @@ const DUMMY_ID = "dummy";
 
 interface Player {
   dotId: string;
+  /** The preset asked for in hello; looked up again when a match starts on a new balance version. */
+  preset: string | undefined;
   /** Anonymous id for this connection only: guests keep nothing between sessions. */
   ref: string;
   side: Side;
@@ -40,9 +42,12 @@ interface Player {
   events: GameEvent[];
 }
 
-/** One authoritative match. Pins its balance version for its whole life. */
+/**
+ * One authoritative room. Each match pins the balance version that was active when it started; a version applied
+ * meanwhile takes over at the next match.
+ */
 export class Room {
-  private readonly world: World;
+  private world: World;
   private readonly players = new Map<WebSocket, Player>();
   private readonly stepper = new FixedStepper();
   private timer: NodeJS.Timeout | null = null;
@@ -53,9 +58,11 @@ export class Room {
   private startedAt = new Date();
 
   constructor(
-    private readonly balance: BalanceVersion,
+    private balance: BalanceVersion,
     private readonly snapshotRate: number,
     private readonly recordMatch: RecordMatch,
+    /** The active balance version as last seen in the database. */
+    private readonly latestBalance: () => BalanceVersion = () => balance,
   ) {
     this.world = createWorld(balance.data, { lane: true });
   }
@@ -88,30 +95,21 @@ export class Room {
           ws.close();
           return;
         }
+        // The first person in starts a fresh match, on the latest version; an empty room stands still.
+        if (!this.players.size) this.newMatch();
         const loadout = loadoutFor(this.world.balance, msg.preset);
         if (!loadout) {
           this.send(ws, { t: "error", message: `unknown preset "${msg.preset}"` });
           ws.close();
           return;
         }
-        // The first person in starts a fresh match; an empty room stands still.
-        if (!this.players.size) this.newMatch();
         const side: Side = [...this.players.values()].some((p) => p.side === 0) ? 1 : 0;
         const dotId = `p${this.nextDotId++}`;
         addDot(this.world, { id: dotId, side, loadout });
-        this.players.set(ws, { dotId, ref: `guest-${randomUUID()}`, side, queue: [], ackSeq: 0, events: [] });
+        const joined: Player = { dotId, preset: msg.preset, ref: `guest-${randomUUID()}`, side, queue: [], ackSeq: 0, events: [] };
+        this.players.set(ws, joined);
         this.updateDummy();
-        this.send(ws, {
-          t: "welcome",
-          protocol: PROTOCOL_VERSION,
-          you: dotId,
-          side,
-          loadout,
-          tick: this.world.tick,
-          tickRate: TICK_RATE,
-          balanceVersion: this.balance.id,
-          balance: this.balance.data,
-        });
+        this.welcome(ws, joined, loadout);
         return;
       }
       case "ping":
@@ -141,8 +139,40 @@ export class Room {
 
   private newMatch(): void {
     this.restartIn = null;
-    resetMatch(this.world);
     this.startedAt = new Date();
+    const latest = this.latestBalance();
+    if (latest.id === this.balance.id) {
+      resetMatch(this.world);
+      return;
+    }
+    // A new version: a new world on it, with everyone back in on their preset as it now reads. The tick carries on,
+    // so clients' clocks stay in step; each gets a fresh welcome with the new record.
+    const tick = this.world.tick;
+    this.balance = latest;
+    this.world = createWorld(latest.data, { lane: true });
+    this.world.tick = this.world.matchStartTick = tick;
+    for (const [ws, p] of this.players) {
+      const loadout = loadoutFor(latest.data, p.preset) ?? loadoutFor(latest.data, undefined)!;
+      addDot(this.world, { id: p.dotId, side: p.side, loadout });
+      p.queue = [];
+      p.events = [];
+      this.welcome(ws, p, loadout);
+    }
+    this.updateDummy();
+  }
+
+  private welcome(ws: WebSocket, player: Player, loadout: Loadout): void {
+    this.send(ws, {
+      t: "welcome",
+      protocol: PROTOCOL_VERSION,
+      you: player.dotId,
+      side: player.side,
+      loadout,
+      tick: this.world.tick,
+      tickRate: TICK_RATE,
+      balanceVersion: this.balance.id,
+      balance: this.balance.data,
+    });
   }
 
   /** The target dummy stands in for the other side while only one person is here. */

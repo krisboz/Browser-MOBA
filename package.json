@@ -14,7 +14,8 @@
     "db:publish-seed": "pnpm --filter @moba/server db:publish-seed",
     "dev": "pnpm --parallel --filter @moba/server --filter @moba/client dev",
     "dev:server": "pnpm --filter @moba/server dev",
-    "dev:client": "pnpm --filter @moba/client dev"
+    "dev:client": "pnpm --filter @moba/client dev",
+    "dashboard": "pnpm --filter @moba/dashboard --parallel run \"/^dev:/\""
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

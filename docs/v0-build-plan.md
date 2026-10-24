@@ -132,9 +132,11 @@ Minion waves (2 melee, 2 ranged every 20 s) with standard targeting and the aggr
 
 The owner dashboard: edit any balance value, apply as a new version with a note, roll back. Applies to new matches only.
 
-- [ ] Changing Bolt's damage and pressing apply changes the next match, not the current one, and the record shows the new version.
+- [x] Changing Bolt's damage and pressing apply changes the next match, not the current one, and the record shows the new version. (Server test against Postgres, and in Chrome: Bolt changed in the dashboard mid-match; that match finished and was recorded on its version, the next one started on the new version with a fresh welcome, prediction rebuilt.)
 
-Owner feedback, 24 Oct: spell wind-ups felt slow; cut to 0.05 s in balance version 2. Until the dashboard exists, `pnpm db:publish-seed "<note>"` publishes the seed's numbers as a new version.
+Owner feedback, 24 Oct: spell wind-ups felt slow; cut to 0.05 s in balance version 2.
+
+How it works: `pnpm dashboard` serves the dashboard on http://localhost:5180 with its API on :8081. The Values tab finds and edits any number in the record (search "bolt damage"); the JSON tab is for adding or removing entries. Every change is checked with the game server's own validation before Apply is allowed, and needs a note. Game servers look for a new active version every 5 s and switch at their next match.
 
 ### M6: Two players over a link
 
@@ -213,7 +215,10 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Starting gold | M4 | 0 |
 | Attack range: measured how? | M2 | From the attacker's centre to the target's edge |
 | Dome edge cases (continuous push against a hook across its edge) | M3 | No special handling; let the blocks interact, jank accepted |
-| Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
+| Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran. A version that no longer fits the current schema can't be rolled back to; it would need a data migration first |
+| How a running game server learns of a new version | M5 | It checks the active version every 5 s (BALANCE_POLL_MS) and switches at its next match: a new world on the new version, each player back in on their preset as the new version has it (or the first preset if it was removed), and a fresh welcome so clients rebuild prediction. The tick carries on |
+| Who can reach the dashboard | M5 | It listens on 127.0.0.1 only. Listening anywhere else needs DASHBOARD_TOKEN, sent by the UI from ?token= in its URL. Real accounts wait for v0.1 |
+| Two edits applied at once | M5 | The second is refused (it was based on a version that is no longer active) and asks you to reload, so nobody silently undoes someone else's change |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
 | Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); S stops. Left click does the same: spells don't need it, see quick cast |
 | Attack move | M4 | Owner, 24 Oct: A attacks the enemy closest to the cursor, for kiting. Of the enemies in attack range, the one closest to the cursor; with none in range, walk toward the cursor and attack the first that comes into range (closest to the cursor), then it is an ordinary attack order. Arriving with nobody in range ends it; a move or S cancels it. Any enemy counts, minions and towers included |

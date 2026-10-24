@@ -116,8 +116,12 @@ export class Game {
     const now = performance.now() / 1000;
     switch (msg.t) {
       case "welcome": {
-        // The server already validated this record; it is the pinned version for this room.
+        // The server already validated this record; it is the version this match runs on. A new match on a newer
+        // version sends a fresh welcome, so prediction starts over on the new rules.
         const balance = msg.balance as BalanceData;
+        this.predictor = null;
+        this.pendingEvents = [];
+        this.texts = [];
         this.session = {
           balance,
           geometry: createWorld(balance).geometry,

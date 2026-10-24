@@ -3,6 +3,8 @@ export interface ServerConfig {
   port: number;
   databaseUrl: string;
   snapshotRate: number;
+  /** How often to look for a newly applied balance version, in ms. */
+  balancePollMs: number;
 }
 
 export class ConfigError extends Error {}
@@ -21,5 +23,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     port: int("PORT", 8080, 0, 65535),
     databaseUrl: env.DATABASE_URL || "postgres://moba:moba@localhost:5432/moba",
     snapshotRate: int("SNAPSHOT_RATE", 20, 1, 60),
+    balancePollMs: int("BALANCE_POLL_MS", 5000, 50, 600_000),
   };
 }
