@@ -4,6 +4,7 @@ import { createWorld, FixedStepper, inRect, type MapGeometry } from "@moba/sim";
 import { hudActions, hudStore, urlPreset } from "../store.js";
 import { ClockSync } from "./clock.js";
 import { SnapshotBuffer } from "./interpolation.js";
+import { closestEnemy, enemyUnder } from "./targeting.js";
 import { Net } from "./net.js";
 import { Predictor } from "./prediction.js";
 import { Renderer, type ClickMarker, type DrawnDot, type FloatingText, type Vec } from "./renderer.js";
@@ -181,17 +182,7 @@ export class Game {
   private enemyAt(screen: Vec): DotSnapshot | null {
     const s = this.session;
     if (!s) return null;
-    const p = this.renderer.screenToWorld(screen);
-    let best: DotSnapshot | null = null;
-    let bestDist = s.balance.dot.radius + CLICK_SLOP;
-    for (const d of this.drawnEnemies) {
-      const dd = Math.hypot(d.x - p.x, d.y - p.y);
-      if (dd <= bestDist) {
-        best = d;
-        bestDist = dd;
-      }
-    }
-    return best;
+    return enemyUnder(this.drawnEnemies, this.renderer.screenToWorld(screen), s.balance.dot.radius + CLICK_SLOP);
   }
 
   private onClick(e: MouseEvent): void {
@@ -207,10 +198,18 @@ export class Game {
     this.marker = { pos: to, age: 0 };
   }
 
+  /** A: attack the enemy under the cursor, or, over empty ground, the enemy closest to the cursor. */
+  private attackMove(): void {
+    if (!this.mouse) return;
+    const target = this.enemyAt(this.mouse) ?? closestEnemy(this.drawnEnemies, this.renderer.screenToWorld(this.mouse));
+    if (target) this.send({ type: "attack", target: target.id });
+  }
+
   private onKey(e: KeyboardEvent): void {
     if (e.repeat) return;
     const key = e.key.toLowerCase();
     if (key === "s") return this.send({ type: "stop" });
+    if (key === "a") return this.attackMove();
     const slot = CAST_KEYS[key];
     if (!slot) return;
     // Quick cast: goes off toward wherever the cursor is.
