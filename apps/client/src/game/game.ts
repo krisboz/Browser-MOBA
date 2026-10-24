@@ -192,6 +192,7 @@ export class Game {
     body:
       | { type: "move"; to: Vec }
       | { type: "attack"; target: string }
+      | { type: "attackMove"; to: Vec }
       | { type: "stop" }
       | { type: "cast"; slot: CastSlot; aim: Vec }
       | { type: "buy"; item: string },
@@ -235,6 +236,13 @@ export class Game {
     if (e.repeat || e.target instanceof HTMLInputElement) return;
     const key = e.key.toLowerCase();
     if (key === "s") return this.send({ type: "stop" });
+    if (key === "a" && this.mouse) {
+      // Attack move: the enemy in range closest to the cursor, or walk that way until one is in range.
+      const to = this.renderer.screenToWorld(this.mouse);
+      this.send({ type: "attackMove", to });
+      this.marker = { pos: to, age: 0, attack: true };
+      return;
+    }
     const slot = CAST_KEYS[key];
     if (!slot) return;
     // Quick cast: goes off toward wherever the cursor is.

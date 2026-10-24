@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Bump on any breaking change to the messages below. Client and server refuse to talk across versions.
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 const finite = z.number().finite();
 const point = z.object({ x: finite, y: finite }).strict();
@@ -19,6 +19,9 @@ export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("move"), seq, tick, to: point }).strict(),
   /** Keep auto attacking this dot until another command. */
   z.object({ type: z.literal("attack"), seq, tick, target: id }).strict(),
+  /** Attack move: attack the enemy in range closest to `to`; with none in range, walk toward `to` and attack the first
+   * that comes into range. */
+  z.object({ type: z.literal("attackMove"), seq, tick, to: point }).strict(),
   /** Stand still: cancels walking, attacking, a channel and any wind-up not yet released. */
   z.object({ type: z.literal("stop"), seq, tick }).strict(),
   /** Cast an ability (Q W E R) or summoner (D F) aimed at a point. */

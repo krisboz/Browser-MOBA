@@ -1,6 +1,6 @@
 import type { BalanceData } from "@moba/balance";
 import type { CastSlot, Command, DotSnapshot, GameEvent, Loadout, SelfState, Side, Snapshot, SpellSnapshot, UnitKind } from "@moba/protocol";
-import { attackOrWalk, clearAttack, heal, stepProjectiles } from "./combat.js";
+import { attackOrWalk, clearAttack, heal, startAttackMove, stepAttackMove, stepProjectiles } from "./combat.js";
 import { buy, resetEconomy, xpIntoLevel } from "./economy.js";
 import { buildGeometry, type MapGeometry, type Vec } from "./geometry.js";
 import { stepMotion } from "./motion.js";
@@ -100,6 +100,7 @@ export function addDot(world: World, opts: NewDot): Dot {
     alive: true,
     respawnIn: 0,
     attackTarget: null,
+    attackMove: null,
     windUp: null,
     attackReadyIn: 0,
     repathIn: 0,
@@ -164,6 +165,10 @@ export function applyCommand(world: World, dotId: string, cmd: Command): void {
       dot.repathIn = 0;
       break;
     }
+    case "attackMove":
+      dot.cast = null;
+      startAttackMove(world, dot, cmd.to);
+      break;
     case "cast":
       castSlot(world, dot, cmd.slot, cmd.aim);
       break;
@@ -199,6 +204,7 @@ export function step(world: World): void {
       if (world.lane && dot.kind === "minion") aimMinion(world, dot);
       if (world.lane && dot.kind === "tower") aimTower(world, dot);
       patrol(world, dot);
+      stepAttackMove(world, dot);
       attackOrWalk(world, dot);
     }
     stepMotion(world, dot);

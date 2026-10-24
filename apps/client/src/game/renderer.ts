@@ -11,6 +11,8 @@ export interface Vec {
 export interface ClickMarker {
   pos: Vec;
   age: number;
+  /** An attack move: drawn red. */
+  attack?: boolean;
 }
 
 export interface FloatingText {
@@ -97,6 +99,7 @@ const COLORS = {
   hook: "#d7b56d",
   path: "rgba(159,232,112,0.35)",
   marker: "#9fe870",
+  attackMarker: "#ff5252",
   cursor: "#ffffff",
 };
 
@@ -222,7 +225,7 @@ export class Renderer {
     if (marker) {
       const p = this.worldToScreen(marker.pos);
       const t = marker.age / 0.4;
-      ctx.strokeStyle = COLORS.marker;
+      ctx.strokeStyle = marker.attack ? COLORS.attackMarker : COLORS.marker;
       ctx.globalAlpha = 1 - t;
       ctx.lineWidth = 2;
       ctx.beginPath();

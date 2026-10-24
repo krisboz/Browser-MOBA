@@ -216,6 +216,7 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Rolling back a balance version | M5 | Creates a new version copied from the old one, so every match points at the exact data it ran |
 | Disconnect: grace period, then forfeit? | M6 | Hold the dot in place for 30 s, then forfeit |
 | Which mouse button moves and attacks | M2 | Right click on the ground moves, right click on an enemy attacks (League style); S stops. Left click does the same: spells don't need it, see quick cast |
+| Attack move | M4 | Owner, 24 Oct: A attacks the enemy closest to the cursor, for kiting. Of the enemies in attack range, the one closest to the cursor; with none in range, walk toward the cursor and attack the first that comes into range (closest to the cursor), then it is an ordinary attack order. Arriving with nobody in range ends it; a move or S cancels it. Any enemy counts, minions and towers included |
 | How spells are aimed and cast | M3 | Quick cast: Q W E R for abilities, D F for summoners, going off toward the cursor when the key is pressed. A wind-up first (cancelled by a move, stop or stun: nothing fires, no cooldown). Casting cancels an auto wind-up (refunded) but keeps the attack order |
 | R before levels exist | M3 | Castable from the start; M4 adds the level 3 unlock |
 | Do skillshots stop at walls? | M3 | No: like autos, they fly over walls. Dashes, leaps and knockbacks stop at walls; Flash and pulls go through |

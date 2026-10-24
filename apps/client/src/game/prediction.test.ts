@@ -24,7 +24,7 @@ function harness({ oneWay, lead, dummyAt, lane = false }: { oneWay: number; lead
   const client = new Predictor(seedV1, "p1", 0, loadout, server.tick + lead, selfState(server, dot));
   const corrections: number[] = [];
 
-  function tick(click?: { x: number; y: number } | { attack: string }) {
+  function tick(click?: { x: number; y: number } | { attack: string } | { attackMove: { x: number; y: number } }) {
     // Server
     while (toServer.length && toServer[0]!.at <= t) queue.push(toServer.shift()!.cmd);
     for (const cmd of queue.filter((c) => c.tick <= server.tick)) {
@@ -41,7 +41,12 @@ function harness({ oneWay, lead, dummyAt, lane = false }: { oneWay: number; lead
       corrections.push(client.lastCorrection);
     }
     if (click) {
-      const body = "attack" in click ? { type: "attack" as const, seq: ++seq, target: click.attack } : { type: "move" as const, seq: ++seq, to: click };
+      const body =
+        "attack" in click
+          ? { type: "attack" as const, seq: ++seq, target: click.attack }
+          : "attackMove" in click
+            ? { type: "attackMove" as const, seq: ++seq, to: click.attackMove }
+            : { type: "move" as const, seq: ++seq, to: click };
       toServer.push({ at: t + oneWay, cmd: client.issue(body) });
     }
     client.step();
@@ -92,6 +97,16 @@ describe("own-movement prediction", () => {
     const gap = Math.hypot(1500 - h.server.pos.x, 300 - h.server.pos.y);
     expect(gap).toBeLessThanOrEqual(450 + 30 + 1e-6);
     expect(gap).toBeGreaterThan(450 + 30 - 3);
+  });
+
+  it("predicts an attack move walking up to an enemy without corrections", () => {
+    const h = harness({ oneWay: 4, lead: 4 + 2, dummyAt: { x: 1500, y: 300 } });
+    for (let i = 0; i < 10; i++) h.tick();
+    h.tick({ attackMove: { x: 1600, y: 300 } });
+    for (let i = 0; i < 200; i++) h.tick();
+    expect(Math.max(...h.corrections)).toBeLessThan(1e-6);
+    expect(h.client.pos).toEqual(h.server.pos);
+    expect(h.server.attackTarget).toBe("dummy");
   });
 
   it("corrects to the server's position when commands arrive late", () => {

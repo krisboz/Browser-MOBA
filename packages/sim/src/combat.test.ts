@@ -66,6 +66,56 @@ describe("autos", () => {
   });
 });
 
+describe("attack move (A)", () => {
+  it("attacks the enemy in range closest to the cursor, not the closest to the dot", () => {
+    const world = createWorld(seedV1);
+    addDot(world, { id: "a", side: 0, loadout: VANILLA, pos: { x: 1000, y: 300 } });
+    addDot(world, { id: "near", side: 1, loadout: VANILLA, pos: { x: 1100, y: 300 } });
+    addDot(world, { id: "far", side: 1, loadout: VANILLA, pos: { x: 1400, y: 300 } });
+    applyCommand(world, "a", cmd.attackMove(1450, 300));
+    expect(world.dots.get("a")!.attackTarget).toBe("far");
+    applyCommand(world, "a", cmd.attackMove(1050, 320));
+    expect(world.dots.get("a")!.attackTarget).toBe("near");
+  });
+
+  it("with nobody in range, walks toward the cursor and attacks the first enemy that comes into range", () => {
+    const world = createWorld(seedV1);
+    const a = addDot(world, { id: "a", side: 0, loadout: VANILLA_MELEE, pos: { x: 500, y: 300 } });
+    const b = addDot(world, { id: "b", side: 1, loadout: VANILLA, pos: { x: 1200, y: 300 } });
+    applyCommand(world, "a", cmd.attackMove(1500, 300));
+    expect(a.attackTarget).toBeNull();
+    run(world, 4, () => a.attackTarget !== null);
+    expect(a.attackTarget).toBe("b");
+    // Stopped at the edge of its range, not walked on to the cursor.
+    expect(Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) - b.radius).toBeLessThanOrEqual(150 + 1e-6);
+    run(world, 2);
+    expect(b.health).toBeLessThan(b.stats.maxHealth);
+  });
+
+  it("arriving with nobody in range ends it: the dot stands and picks nobody later", () => {
+    const world = createWorld(seedV1);
+    const a = addDot(world, { id: "a", side: 0, loadout: VANILLA, pos: { x: 500, y: 300 } });
+    applyCommand(world, "a", cmd.attackMove(700, 300));
+    run(world, 1.5);
+    expect(a.attackMove).toBeNull();
+    const b = addDot(world, { id: "b", side: 1, loadout: VANILLA, pos: { x: 900, y: 300 } });
+    run(world, 2);
+    expect(b.health).toBe(b.stats.maxHealth);
+  });
+
+  it("a move order cancels it", () => {
+    const world = createWorld(seedV1);
+    const a = addDot(world, { id: "a", side: 0, loadout: VANILLA, pos: { x: 500, y: 300 } });
+    const b = addDot(world, { id: "b", side: 1, loadout: VANILLA, pos: { x: 1300, y: 300 } });
+    applyCommand(world, "a", cmd.attackMove(1300, 300));
+    run(world, 0.5);
+    applyCommand(world, "a", cmd.move(500, 300));
+    run(world, 5);
+    expect(a.attackTarget).toBeNull();
+    expect(b.health).toBe(b.stats.maxHealth);
+  });
+});
+
 describe("death, respawn and the match", () => {
   it("respawns at home with full health after 6 s", () => {
     const world = createWorld(seedV1);

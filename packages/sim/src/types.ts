@@ -97,6 +97,8 @@ export interface Dot {
   respawnIn: number;
   /** The dot this one keeps auto attacking, until another command. */
   attackTarget: string | null;
+  /** An attack move still looking for a target: where it is walking, and what "closest to the cursor" measures from. */
+  attackMove: Vec | null;
   windUp: WindUp | null;
   /** Seconds until the next wind-up may start. */
   attackReadyIn: number;

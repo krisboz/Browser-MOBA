@@ -208,7 +208,7 @@ function Hud() {
             <Button onClick={() => hudActions.dummy("patrol")}>patrol on/off</Button>
           </div>
         )}
-        <div style={{ marginTop: 6 }}>right click: walk or attack · Q W E R, D F: cast at the cursor · S: stop (cancels a wind-up) · P: shop</div>
+        <div style={{ marginTop: 6 }}>right click: walk or attack · A: attack the enemy nearest the cursor · Q W E R, D F: cast at the cursor · S: stop (cancels a wind-up) · P: shop</div>
       </div>
 
       <AbilityBar abilities={hud.abilities} lockedUntil={hud.ultimateLevel} />

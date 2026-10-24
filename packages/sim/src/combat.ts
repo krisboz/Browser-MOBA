@@ -14,9 +14,10 @@ import { isVisibleTo } from "./vision.js";
 // How often a dot chasing an attack target re-plans its path, in seconds.
 const CHASE_REPATH = 0.25;
 
-/** Drops the attack order and any wind-up not yet released. Nothing fires; the attack timer is refunded. */
+/** Drops the attack order (and any attack move) and any wind-up not yet released. Nothing fires; the attack timer is refunded. */
 export function clearAttack(dot: Dot): void {
   dot.attackTarget = null;
+  dot.attackMove = null;
   if (dot.windUp) {
     dot.windUp = null;
     dot.attackReadyIn = 0;
@@ -43,6 +44,42 @@ function autoStyle(world: World, dot: Dot): { windUpShare: number; shotSpeed: nu
 
 export function face(dot: Dot, toward: Vec): void {
   if (toward.x !== dot.pos.x || toward.y !== dot.pos.y) dot.facing = Math.atan2(toward.y - dot.pos.y, toward.x - dot.pos.x);
+}
+
+/** The enemy an attack move toward `toward` goes for: of those in attack range, the one closest to `toward`. */
+function attackMoveTarget(world: World, dot: Dot, toward: Vec): Dot | undefined {
+  let best: Dot | undefined;
+  let bestDist = Infinity;
+  for (const d of world.dots.values()) {
+    if (!d.alive || d.side === dot.side || !isVisibleTo(world, d, dot.side) || !inRange(world, dot, d)) continue;
+    const dd = dist(d.pos, toward);
+    if (dd < bestDist) {
+      best = d;
+      bestDist = dd;
+    }
+  }
+  return best;
+}
+
+/** Starts an attack move: attack at once if an enemy is in range, otherwise walk toward the point looking for one. */
+export function startAttackMove(world: World, dot: Dot, to: Vec): void {
+  clearAttack(dot);
+  dot.attackMove = { ...to };
+  dot.path = findPath(world.nav, dot.pos, to);
+  stepAttackMove(world, dot);
+}
+
+/** While attack moving: the first tick an enemy is in range, it becomes an ordinary attack order. Arriving ends it. */
+export function stepAttackMove(world: World, dot: Dot): void {
+  const to = dot.attackMove;
+  if (!to) return;
+  const target = attackMoveTarget(world, dot, to);
+  if (target) {
+    dot.attackMove = null;
+    dot.attackTarget = target.id;
+    dot.path = [];
+    dot.repathIn = 0;
+  } else if (!dot.path.length) dot.attackMove = null;
 }
 
 /** Auto attacking and walking, for a dot free to act this tick. */

@@ -22,6 +22,7 @@ export function run(world: World, seconds: number, until?: () => boolean): numbe
 let seq = 0;
 export const cmd = {
   attack: (target: string) => ({ type: "attack" as const, seq: ++seq, tick: 0, target }),
+  attackMove: (x: number, y: number) => ({ type: "attackMove" as const, seq: ++seq, tick: 0, to: { x, y } }),
   move: (x: number, y: number) => ({ type: "move" as const, seq: ++seq, tick: 0, to: { x, y } }),
   stop: () => ({ type: "stop" as const, seq: ++seq, tick: 0 }),
 };
