@@ -9,7 +9,7 @@ import { seedV1 } from "@moba/balance";
 import { BalanceLoadError } from "./balance-loader.js";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { migrate } from "./db/migrate.js";
-import { seed } from "./db/seed.js";
+import { publishSeed, seed } from "./db/seed.js";
 import { startServer, type RunningServer } from "./server.js";
 
 // Needs Postgres. CI provides it; locally, start it with `pnpm db:up` and set DATABASE_URL.
@@ -192,6 +192,21 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
     expect(players[0].spells).toMatchObject({ Q: "piercer", R: "overdrive" });
     expect(players[0].kill_times).toHaveLength(1);
     ws.close();
+    await pool.end();
+  });
+
+  it("publishes changed seed numbers as a new active version, leaving the old one for its matches", async () => {
+    const { url, pool } = await freshDb();
+    const old = structuredClone(seedV1);
+    old.abilities.find((a) => a.id === "bolt")!.windUp = 0.25;
+    await pool.query("INSERT INTO balance_versions (note, data, is_active) VALUES ('old', $1, true)", [JSON.stringify(old)]);
+    const id = await publishSeed(pool, "faster wind-ups");
+    expect(await publishSeed(pool, "again")).toBeNull(); // nothing changed since
+    const { rows } = await pool.query("SELECT id, parent_id, note, is_active, data FROM balance_versions ORDER BY id");
+    expect(rows).toMatchObject([
+      { is_active: false, data: old },
+      { id, parent_id: rows[0].id, note: "faster wind-ups", is_active: true, data: seedV1 },
+    ]);
     await pool.end();
   });
 

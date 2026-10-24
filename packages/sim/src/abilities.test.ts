@@ -304,7 +304,8 @@ describe("abilities", () => {
     addDot(world, { id: "b", side: 0, loadout: kit({ Q: "burst" }), pos: { x: 1000, y: 300 } });
     const e = addDot(world, { id: "e", side: 1, loadout: VANILLA, pos: { x: 1400, y: 300 } });
     applyCommand(world, "b", cast("Q", 1400, 300));
-    run(world, 0.25 + 0.7);
+    const def = seedV1.abilities.find((a) => a.id === "burst")!;
+    run(world, def.windUp + 0.7);
     expect(e.health).toBe(e.stats.maxHealth);
     run(world, 0.2);
     expect(e.health).toBeLessThan(e.stats.maxHealth);

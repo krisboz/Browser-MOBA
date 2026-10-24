@@ -22,3 +22,36 @@ export async function seed(pool: pg.Pool, { replace = false } = {}): Promise<boo
   );
   return rowCount === 1;
 }
+
+/**
+ * Publishes the seed's numbers as a new balance version and makes it active, leaving older versions (and the
+ * matches that point at them) as they were. Does nothing if the active version already has these numbers.
+ * Returns the new version's id, or null. A stopgap until the owner dashboard (M5) applies changes.
+ */
+export async function publishSeed(pool: pg.Pool, note: string): Promise<number | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ id: number; same: boolean }>(
+      "SELECT id, data = $1::jsonb AS same FROM balance_versions WHERE is_active FOR UPDATE",
+      [JSON.stringify(seedV1)],
+    );
+    const active = rows[0];
+    if (active?.same) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    await client.query("UPDATE balance_versions SET is_active = false WHERE is_active");
+    const inserted = await client.query<{ id: number }>(
+      "INSERT INTO balance_versions (note, parent_id, data, is_active) VALUES ($1, $2, $3, true) RETURNING id",
+      [note, active?.id ?? null, JSON.stringify(seedV1)],
+    );
+    await client.query("COMMIT");
+    return inserted.rows[0]!.id;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}

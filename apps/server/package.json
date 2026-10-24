@@ -7,6 +7,7 @@
     "start": "tsx --env-file-if-exists=../../.env src/main.ts",
     "db:migrate": "tsx --env-file-if-exists=../../.env src/db/cli.ts migrate",
     "db:seed": "tsx --env-file-if-exists=../../.env src/db/cli.ts seed",
+    "db:publish-seed": "tsx --env-file-if-exists=../../.env src/db/cli.ts publish-seed",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

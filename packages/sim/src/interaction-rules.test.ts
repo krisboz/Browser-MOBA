@@ -95,7 +95,7 @@ describe("An auto always lands once released, even if the attacker dies or moves
     const world = createWorld(seedV1);
     const a = addDot(world, { id: "a", side: 0, loadout: kit({ Q: "bolt" }), pos: { x: 1000, y: 300 } });
     applyCommand(world, "a", cast("Q", 1400, 300));
-    run(world, 0.1);
+    run(world, 1 / 30); // one tick into the wind-up
     applyCommand(world, "a", cmd.move(900, 300));
     run(world, 1);
     expect(world.spells).toHaveLength(0);
@@ -111,8 +111,8 @@ describe("Skillshot spells fly in a straight line at a fixed speed and hit the f
     const back = addDot(world, { id: "back", side: 1, loadout: VANILLA, pos: { x: 1500, y: 300 } });
     applyCommand(world, "a", cast("Q", 1500, 300));
     const t = run(world, 2, () => front.health < front.stats.maxHealth);
-    // 0.25 s wind-up, then 400 - 30 - 15 units at 1400 units/s.
-    expect(t).toBeCloseTo(0.25 + (400 - R - 15) / 1400, 1);
+    // The wind-up, then 400 - 30 - 15 units at 1400 units/s.
+    expect(t).toBeCloseTo(seedV1.abilities.find((a) => a.id === "bolt")!.windUp + (400 - R - 15) / 1400, 1);
     run(world, 1);
     expect(back.health).toBe(back.stats.maxHealth);
   });
@@ -186,7 +186,7 @@ describe("A stun stops everything.", () => {
     const world = createWorld(seedV1);
     const a = addDot(world, { id: "a", side: 0, loadout: kit({ Q: "bolt" }), pos: { x: 1000, y: 300 } });
     applyCommand(world, "a", cast("Q", 1400, 300));
-    run(world, 0.1);
+    run(world, 1 / 30); // one tick into the wind-up
     inflict(world, a, [{ kind: "stun", duration: 0.5 }], { side: 1 });
     run(world, 1);
     expect(world.spells).toHaveLength(0);

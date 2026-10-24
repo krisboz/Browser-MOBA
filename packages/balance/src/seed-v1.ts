@@ -97,7 +97,7 @@ export const seedV1: BalanceData = {
   abilities: [
     // Q: main damage
     {
-      id: "bolt", name: "Bolt", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
+      id: "bolt", name: "Bolt", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.05,
       blocks: [{ kind: "projectile", hits: "first", falloffAfterFirst: 0, returns: false, speed: 1400, range: 900, width: 30, onHit: [damage(120)] }],
     },
     {
@@ -105,15 +105,15 @@ export const seedV1: BalanceData = {
       blocks: [{ kind: "empoweredAuto", duration: 4, resetAttackTimer: true, onHit: [damage(120)] }],
     },
     {
-      id: "piercer", name: "Piercer", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0.3,
+      id: "piercer", name: "Piercer", slot: "Q", type: "physical", cost: 0, cooldown: 5, windUp: 0.05,
       blocks: [{ kind: "projectile", hits: "pierce", falloffAfterFirst: 0.5, returns: false, speed: 1000, range: 1000, width: 40, onHit: [damage(120)] }],
     },
     {
-      id: "burst", name: "Burst", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
+      id: "burst", name: "Burst", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.05,
       blocks: [{ kind: "area", timing: "delayed", delay: 0.8, duration: 0, castRange: 800, radius: 120, onHit: [damage(120)], whileInside: [] }],
     },
     {
-      id: "boomerang", name: "Boomerang", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.25,
+      id: "boomerang", name: "Boomerang", slot: "Q", type: "magic", cost: 0, cooldown: 5, windUp: 0.05,
       blocks: [{ kind: "projectile", hits: "pierce", falloffAfterFirst: 0, returns: true, speed: 1100, range: 800, width: 40, onHit: [damage(80)] }],
     },
     {
@@ -127,7 +127,7 @@ export const seedV1: BalanceData = {
     },
     // W: defence and utility
     {
-      id: "chill-field", name: "Chill Field", slot: "W", type: "magic", cost: 0, cooldown: 12, windUp: 0.25,
+      id: "chill-field", name: "Chill Field", slot: "W", type: "magic", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [{ kind: "area", timing: "lasting", delay: 0, duration: 3, castRange: 700, radius: 200, onHit: [damage(100)], whileInside: [{ kind: "slow", amount: 0.3, duration: 0.1 }] }],
     },
     {
@@ -143,7 +143,7 @@ export const seedV1: BalanceData = {
       blocks: [{ kind: "invisible", duration: 2 }],
     },
     {
-      id: "trap", name: "Trap", slot: "W", type: "none", cost: 0, cooldown: 12, windUp: 0.25,
+      id: "trap", name: "Trap", slot: "W", type: "none", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [{ kind: "placed", castRange: 400, radius: 40, lifetime: 30, onEnter: [{ kind: "root", duration: 1.25 }] }],
     },
     // E: mobility and crowd control
@@ -152,19 +152,19 @@ export const seedV1: BalanceData = {
       blocks: [{ kind: "move", style: "dash", distance: 300, speed: 1200, crossesWalls: false, onLand: [] }],
     },
     {
-      id: "snare-shot", name: "Snare Shot", slot: "E", type: "magic", cost: 0, cooldown: 12, windUp: 0.25,
+      id: "snare-shot", name: "Snare Shot", slot: "E", type: "magic", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [{ kind: "projectile", hits: "first", falloffAfterFirst: 0, returns: false, speed: 1300, range: 900, width: 30, onHit: [damage(100), { kind: "root", duration: 1.5 }] }],
     },
     {
-      id: "reel", name: "Reel", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.25,
+      id: "reel", name: "Reel", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [{ kind: "hook", speed: 1300, range: 800, width: 35, retractSpeed: 1600, onHit: [damage(100)] }],
     },
     {
-      id: "shove", name: "Shove", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.15,
+      id: "shove", name: "Shove", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [{ kind: "area", timing: "instant", delay: 0, duration: 0, castRange: 0, radius: 160, onHit: [damage(60), { kind: "knockback", distance: 300, speed: 1500 }], whileInside: [] }],
     },
     {
-      id: "leap", name: "Leap", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.15,
+      id: "leap", name: "Leap", slot: "E", type: "physical", cost: 0, cooldown: 12, windUp: 0.05,
       blocks: [
         {
           kind: "move", style: "leap", distance: 450, speed: 900, crossesWalls: false,
@@ -174,11 +174,11 @@ export const seedV1: BalanceData = {
     },
     // R: ultimates
     {
-      id: "dome", name: "Dome", slot: "R", type: "none", cost: 0, cooldown: 50, windUp: 0.25,
+      id: "dome", name: "Dome", slot: "R", type: "none", cost: 0, cooldown: 50, windUp: 0.05,
       blocks: [{ kind: "zone", radius: 350, expandTime: 0.5, duration: 4, pushesEnemiesOut: true, blocksSpellsFromOutside: true }],
     },
     {
-      id: "artillery", name: "Artillery", slot: "R", type: "magic", cost: 0, cooldown: 50, windUp: 0.25,
+      id: "artillery", name: "Artillery", slot: "R", type: "magic", cost: 0, cooldown: 50, windUp: 0.05,
       blocks: [
         {
           kind: "channel", duration: 4, shots: 5, shotInterval: 0.5,
@@ -187,7 +187,7 @@ export const seedV1: BalanceData = {
       ],
     },
     {
-      id: "finisher", name: "Finisher", slot: "R", type: "physical", cost: 0, cooldown: 50, windUp: 0.35,
+      id: "finisher", name: "Finisher", slot: "R", type: "physical", cost: 0, cooldown: 50, windUp: 0.05,
       blocks: [{ kind: "area", timing: "instant", delay: 0, duration: 0, castRange: 150, radius: 100, onHit: [{ kind: "damage", base: 320, ratio: 0.6, missingHealthBonus: 1 }], whileInside: [] }],
     },
     {

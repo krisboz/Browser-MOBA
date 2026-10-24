@@ -134,7 +134,7 @@ The owner dashboard: edit any balance value, apply as a new version with a note,
 
 - [ ] Changing Bolt's damage and pressing apply changes the next match, not the current one, and the record shows the new version.
 
-Owner feedback to tune first: spell wind-ups feel a bit slow (24 Oct).
+Owner feedback, 24 Oct: spell wind-ups felt slow; cut to 0.05 s in balance version 2. Until the dashboard exists, `pnpm db:publish-seed "<note>"` publishes the seed's numbers as a new version.
 
 ### M6: Two players over a link
 
@@ -198,7 +198,7 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 
 | Question | Needed by | Proposed default |
 | --- | --- | --- |
-| Wind-up length at 1.0 attacks/s, and for spells | M2 | Auto wind-up 30% of the attack interval; spells a flat 0.25 s |
+| Wind-up length at 1.0 attacks/s, and for spells | M2 | Auto wind-up 30% of the attack interval. Spells: owner playtest 24 Oct found 0.15 to 0.35 s too slow and too easy to cancel, so every spell that had one now winds up for 0.05 s (two ticks, so the arms still show it); balance version 2 |
 | Dot radius, and whether dots and minions block each other | M1 | Radius 30; no body blocking in v0 |
 | Health regeneration and base healing | M2 | No passive regen; standing in your own base heals 20% of max health per second. Decides how strong poke is, so test both |
 | Brush: does attacking from brush reveal you? | M2 | Yes, for 1 s after any auto or cast |
