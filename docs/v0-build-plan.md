@@ -101,7 +101,7 @@ Workspace, strict TypeScript, Vite + React client, Node ws server, Postgres in d
 Lane map data, nav grid, A* with smoothing, click-to-move, camera, click marker, cursor. Brush as a vision rule in the sim: a dot inside brush is left out of the other side's snapshot. Latency switch. Own-movement prediction and reconciliation, so snappy movement is tested against lag from the start.
 
 - [x] A dot walks base to base around every obstacle with one click.
-- [ ] Movement still feels snappy with 80 ms of added latency. (Measured in Chromium at +80 ms: the dot moves on the first frame after the click, as with no lag, and prediction needed no corrections even at +250 ms. Waiting on the owner's playtest.)
+- [x] Movement still feels snappy with 80 ms of added latency. (Measured in Chromium at +80 ms: the dot moves on the first frame after the click, as with no lag, and prediction needed no corrections even at +250 ms. Owner playtest 24 Oct: feels okay.)
 
 ### M2: Autos and the dummy
 
@@ -122,9 +122,9 @@ Statuses and forced movement first, then the skill blocks, then the 16 abilities
 
 Minion waves (2 melee, 2 ranged every 20 s) with standard targeting and the aggro switch. Towers with the same switch, homing shots and the 25% ramp. Experience, levels, 4% cooldown cut per level, R at level 3. Gold from last hits, the 1/s trickle, kills with the comeback multiplier, towers. Shop at base with the 7 items. Match record written by the server at match end.
 
-- [ ] A full match against the dummy runs to 5 kills.
-- [ ] The first item lands around level 2 or 3 in a normal farming game.
-- [ ] Each match leaves one record in Postgres with the game version.
+- [x] A full match against the dummy runs to 5 kills. (Sim test with the lane running, and played through the real server and client at +80 ms: 5:0 in 42 s as Diver. Minions and towers treat the dummy as a dot, so they can score some of the five.)
+- [x] The first item lands around level 2 or 3 in a normal farming game. (A scripted farmer that last hits about half the minions affords Boots at level 2, about 100 s in, and a 400 item at level 2, about 160 s in. A perfect farmer reaches 400 at level 3.)
+- [x] Each match leaves one record in Postgres with the game version. (Server test against Postgres, and the browser match above left one `matches` row with `balance_version_id` 1 and both players.)
 
 **Gate: a full match against the dummy.**
 
@@ -133,6 +133,8 @@ Minion waves (2 melee, 2 ranged every 20 s) with standard targeting and the aggr
 The owner dashboard: edit any balance value, apply as a new version with a note, roll back. Applies to new matches only.
 
 - [ ] Changing Bolt's damage and pressing apply changes the next match, not the current one, and the record shows the new version.
+
+Owner feedback to tune first: spell wind-ups feel a bit slow (24 Oct).
 
 ### M6: Two players over a link
 
@@ -236,6 +238,16 @@ Each open question has a proposed default, so no milestone waits on an answer; t
 | Changing the balance schema once matches exist | M5 | A data migration adds a new version converted from the active one; `db:seed --force` only works before the first match |
 | Base depth, brush shapes, tower size | M1 | Bases 300 deep; two 200 × 160 brush patches at the midpoint, one against each edge; tower radius 50 |
 | Sim tick and snapshot rate | M0 | 30 ticks/s, 20 snapshots/s; revisit after M6 playtests |
+| Minion targeting details | M4 | They look for targets within 500 (centre to edge). Order: enemy minions, then the tower, then dots; a minion sticks with its target while that is still the best kind near. The aggro switch lasts 2 s after the last hit on a dot, for minions within 500 of the attacker. Wind-up 30% like dots, ranged shots 900 units/s |
+| Tower targeting details | M4 | Keeps its target while it stays in range (League style), minions before dots when choosing. Switches to a dot in its range that hurts an enemy dot. The 25% ramp starts over on a new target. Shots leave with no wind-up |
+| Kill by a tower or minion | M4 | Scores for that side; pays no gold or experience to anyone |
+| Who gets tower gold and experience | M4 | Every dot on the side that destroyed it, whoever landed the last hit |
+| Do spells hit minions and towers? | M4 | Minions yes: they block skillshots and can be hooked, rooted and pushed. Towers take autos only. Traps go off for dots only, or a wave would always spring them first |
+| Level cooldown cut on summoners | M4 | Abilities only; summoners keep their cooldown |
+| Inventory, selling, buying while dead | M4 | 6 slots, duplicates allowed, no selling; the dead may buy. Item and buff movement bonuses add up before the 450 cap |
+| A destroyed tower | M4 | Stays down until the next match, as rubble that still blocks walking |
+| An empty room | M4 | Stands still; the first person in starts a fresh match. A match nobody finishes leaves no record |
+| Minions and towers against the dummy | M4 | They attack it like any dot, so they can kill it and score. If that gets in the way of testing spells, add a switch that makes lane units ignore it |
 
 ## Risks
 

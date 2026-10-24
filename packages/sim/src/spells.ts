@@ -1,6 +1,7 @@
 import type { AbilityDef, AreaBlockDef, BlockDef, EffectDef, SummonerDef } from "@moba/balance";
 import type { CastSlot } from "@moba/protocol";
 import { clearAttack, damageDot, face, reveal } from "./combat.js";
+import { levelledCooldown, slotUnlocked } from "./economy.js";
 import { dist, type Vec } from "./geometry.js";
 import { clampToRange, clipLine, setMotion } from "./motion.js";
 import { addStatus, effectiveStats, isRooted, isStunned } from "./statuses.js";
@@ -14,12 +15,14 @@ export function defFor(world: World, dot: Dot, slot: CastSlot): AbilityDef | Sum
 }
 
 const movesSelf = (def: AbilityDef | SummonerDef) => def.blocks.some((b) => b.kind === "move");
+/** What spells reach: dots and minions. Towers only take autos. */
+const spellTarget = (dot: Dot) => dot.alive && dot.kind !== "tower";
 const style = (def: AbilityDef | SummonerDef) => def.blocks.find((b) => b.kind === "move")?.style;
 
 /** Whether `dot` may start casting `slot` now. */
 export function canCast(world: World, dot: Dot, slot: CastSlot): boolean {
   const def = defFor(world, dot, slot);
-  if (!def || !dot.alive || isStunned(dot) || dot.cooldowns[slot] > 1e-9) return false;
+  if (!def || !dot.alive || isStunned(dot) || dot.cooldowns[slot] > 1e-9 || !slotUnlocked(world.balance, dot, slot)) return false;
   if (dot.channel) return false;
   if (movesSelf(def)) {
     // A root stops Dash, Leap and Flash. An anchored thrower may still Flash, but not Dash or Leap.
@@ -78,7 +81,7 @@ function releaseCast(world: World, dot: Dot, slot: CastSlot, aim: Vec): void {
   if (!def) return;
   // Blocked between starting the wind-up and its release (rooted mid-cast, say): it fizzles, no cooldown spent.
   if (movesSelf(def) && (isRooted(dot) || (dot.anchoredBy !== null && style(def) !== "blink"))) return;
-  dot.cooldowns[slot] = def.cooldown;
+  dot.cooldowns[slot] = levelledCooldown(world.balance, dot.level, slot, def.cooldown);
   dot.lastCastTick = world.tick;
   reveal(world, dot);
   const ctx = makeCtx(world, dot, def);
@@ -271,9 +274,8 @@ function armArea(world: World, area: Extract<SpellEntity, { kind: "area" }>): vo
 }
 
 function hitArea(world: World, area: Extract<SpellEntity, { kind: "area" }>): void {
-  const r = world.balance.dot.radius;
   for (const dot of world.dots.values()) {
-    if (!dot.alive || dot.side === area.ctx.side || dist(dot.pos, area.pos) > area.radius + r) continue;
+    if (!spellTarget(dot) || dot.side === area.ctx.side || dist(dot.pos, area.pos) > area.radius + dot.radius) continue;
     if (!area.hitIds.includes(dot.id)) {
       area.hitIds.push(dot.id);
       applyEffects(world, area.ctx, dot, area.onHit, area.pos);
@@ -352,15 +354,15 @@ export function applyEffects(world: World, ctx: SpellCtx, target: Dot, effects: 
   return true;
 }
 
-/** First enemy dot (or all, in order) a circle of `width` sweeping from `a` to `b` touches. */
+/** Enemy dots and minions a circle of `width` sweeping from `a` to `b` touches, in the order it touches them. */
 function sweep(world: World, ctx: SpellCtx, a: Vec, b: Vec, width: number, skip: string[]): { dot: Dot; t: number }[] {
-  const R = world.balance.dot.radius + width / 2;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len2 = dx * dx + dy * dy;
   const hits: { dot: Dot; t: number }[] = [];
   for (const dot of world.dots.values()) {
-    if (!dot.alive || dot.side === ctx.side || skip.includes(dot.id)) continue;
+    if (!spellTarget(dot) || dot.side === ctx.side || skip.includes(dot.id)) continue;
+    const R = dot.radius + width / 2;
     // Earliest t in [0, 1] where |a + t(b - a) - c| <= R.
     const fx = a.x - dot.pos.x;
     const fy = a.y - dot.pos.y;
@@ -387,17 +389,16 @@ const towards = (from: Vec, to: Vec, stride: number): { pos: Vec; arrived: boole
 
 /** Moves every spell in play one tick and lets it hit. */
 export function stepSpells(world: World): void {
-  const r = world.balance.dot.radius;
   // Every spell stays visible to the others while they step (a dome must be there for a bolt to hit it).
   // Spells spawned while stepping (a landing area, say) move from next tick.
   const done = new Set<SpellEntity>();
   for (const s of [...world.spells]) {
-    if (!stepSpell(world, s, r)) done.add(s);
+    if (!stepSpell(world, s)) done.add(s);
   }
   world.spells = world.spells.filter((s) => !done.has(s));
 }
 
-function stepSpell(world: World, s: SpellEntity, r: number): boolean {
+function stepSpell(world: World, s: SpellEntity): boolean {
   switch (s.kind) {
     case "shot": {
       const caster = world.dots.get(s.ctx.caster);
@@ -408,7 +409,7 @@ function stepSpell(world: World, s: SpellEntity, r: number): boolean {
         if (!caster || !caster.alive) return false;
         const step = towards(from, caster.pos, s.speed * DT);
         to = step.pos;
-        done = step.arrived || dist(to, caster.pos) <= r;
+        done = step.arrived || dist(to, caster.pos) <= caster.radius;
       } else {
         const stride = Math.min(s.speed * DT, s.range - s.traveled);
         to = { x: from.x + s.dir.x * stride, y: from.y + s.dir.y * stride };
@@ -431,7 +432,7 @@ function stepSpell(world: World, s: SpellEntity, r: number): boolean {
       return true;
     }
     case "hook":
-      return stepHook(world, s, r);
+      return stepHook(world, s);
     case "area": {
       if (!s.armed) {
         s.delayLeft -= DT;
@@ -447,8 +448,9 @@ function stepSpell(world: World, s: SpellEntity, r: number): boolean {
       if (s.pushes) {
         const radius = zoneRadius(s);
         for (const dot of world.dots.values()) {
-          if (!dot.alive || dot.side === s.ctx.side) continue;
+          if (!spellTarget(dot) || dot.side === s.ctx.side) continue;
           const d = dist(dot.pos, s.pos);
+          const r = dot.radius;
           if (d >= radius + r) continue;
           // Pushed to the edge. A push is a forced movement, so it ends any other one in progress.
           const dir = d > 1e-9 ? { x: (dot.pos.x - s.pos.x) / d, y: (dot.pos.y - s.pos.y) / d } : { x: 1, y: 0 };
@@ -460,8 +462,9 @@ function stepSpell(world: World, s: SpellEntity, r: number): boolean {
     }
     case "trap": {
       s.remaining -= DT;
+      // Only dots set traps off; a wave walking over one would always spring it first.
       for (const dot of world.dots.values()) {
-        if (!dot.alive || dot.side === s.ctx.side || dist(dot.pos, s.pos) > s.radius + r) continue;
+        if (!dot.alive || dot.kind !== "dot" || dot.side === s.ctx.side || dist(dot.pos, s.pos) > s.radius + dot.radius) continue;
         applyEffects(world, s.ctx, dot, s.onEnter, s.pos);
         return false;
       }
@@ -470,7 +473,7 @@ function stepSpell(world: World, s: SpellEntity, r: number): boolean {
   }
 }
 
-function stepHook(world: World, h: Extract<SpellEntity, { kind: "hook" }>, r: number): boolean {
+function stepHook(world: World, h: Extract<SpellEntity, { kind: "hook" }>): boolean {
   const owner = world.dots.get(h.ctx.caster);
   const done = () => {
     if (owner && owner.anchoredBy === h.id) owner.anchoredBy = null;
@@ -509,7 +512,7 @@ function stepHook(world: World, h: Extract<SpellEntity, { kind: "hook" }>, r: nu
       return true;
     }
     // Arrived next to the thrower: the hook is back. Anything else (a newer movement, a death): it comes back empty.
-    if (victim?.alive && dist(victim.pos, owner.pos) <= 2 * r + 1) return done();
+    if (victim?.alive && dist(victim.pos, owner.pos) <= victim.radius + owner.radius + 1) return done();
     if (victim) h.pos = { ...victim.pos };
     h.state = "returning";
     h.victim = null;
@@ -517,6 +520,6 @@ function stepHook(world: World, h: Extract<SpellEntity, { kind: "hook" }>, r: nu
 
   const step = towards(h.pos, owner.pos, h.retractSpeed * DT);
   h.pos = step.pos;
-  if (step.arrived || dist(h.pos, owner.pos) <= r) return done();
+  if (step.arrived || dist(h.pos, owner.pos) <= owner.radius) return done();
   return true;
 }

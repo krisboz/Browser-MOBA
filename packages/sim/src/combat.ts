@@ -1,6 +1,8 @@
 import type { EffectDef } from "@moba/balance";
 import type { Side } from "@moba/protocol";
+import { inOwnBase, matchTime, payForKill } from "./economy.js";
 import { dist, isClear, isSegmentClear, pushOut, type Vec } from "./geometry.js";
+import { callForHelp, towerShotDamage } from "./lane.js";
 import { findPath } from "./nav.js";
 import { applyEffects } from "./spells.js";
 import { attackInterval, mitigate } from "./stats.js";
@@ -22,8 +24,21 @@ export function clearAttack(dot: Dot): void {
 }
 
 /** Attack range runs from the attacker's centre to the target's edge. */
-export function inRange(world: World, dot: Dot, target: Dot): boolean {
-  return dist(dot.pos, target.pos) - world.balance.dot.radius <= dot.stats.range + 1e-9;
+export function inRange(_world: World, dot: Dot, target: Dot): boolean {
+  return dist(dot.pos, target.pos) - target.radius <= dot.stats.range + 1e-9;
+}
+
+/** How a unit's autos go: the share of the attack interval spent winding up, and how fast a ranged shot flies. */
+function autoStyle(world: World, dot: Dot): { windUpShare: number; shotSpeed: number } {
+  const b = world.balance;
+  switch (dot.kind) {
+    case "dot":
+      return { windUpShare: b.dot.autoWindUpShare, shotSpeed: b.dot.rangedAutoSpeed };
+    case "minion":
+      return { windUpShare: b.minions.autoWindUpShare, shotSpeed: b.minions.shotSpeed };
+    case "tower":
+      return { windUpShare: b.towers.autoWindUpShare, shotSpeed: b.towers.shotSpeed };
+  }
 }
 
 export function face(dot: Dot, toward: Vec): void {
@@ -53,12 +68,12 @@ export function attackOrWalk(world: World, dot: Dot): void {
       if (dot.attackReadyIn <= 0) {
         const interval = attackInterval(effectiveStats(world, dot));
         dot.attackReadyIn = interval;
-        dot.windUp = { target: target.id, elapsed: 0, duration: interval * world.balance.dot.autoWindUpShare };
+        dot.windUp = { target: target.id, elapsed: 0, duration: interval * autoStyle(world, dot).windUpShare };
       }
       return;
     }
     if (canWalk(dot) && (dot.repathIn <= 0 || !dot.path.length)) {
-      dot.path = isSegmentClear(world.geometry, dot.pos, target.pos, world.balance.dot.radius)
+      dot.path = isSegmentClear(world.geometry, dot.pos, target.pos, dot.radius)
         ? [{ ...target.pos }]
         : findPath(world.nav, dot.pos, target.pos);
       dot.repathIn = CHASE_REPATH;
@@ -92,8 +107,7 @@ export function walk(world: World, dot: Dot, stopFor?: Dot): void {
       left -= stride;
     }
   }
-  const r = world.balance.dot.radius;
-  if (!isClear(world.geometry, dot.pos, r)) dot.pos = pushOut(world.geometry, dot.pos, r);
+  if (!isClear(world.geometry, dot.pos, dot.radius)) dot.pos = pushOut(world.geometry, dot.pos, dot.radius);
 }
 
 /** Attacking or casting shows you: out of brush for a moment, and out of invisibility for good. */
@@ -109,7 +123,8 @@ function release(world: World, dot: Dot, target: Dot): void {
   const empowered = dot.statuses.find((s) => s.kind === "empowered");
   if (empowered) dot.statuses = dot.statuses.filter((s) => s !== empowered);
   const bonus = empowered?.kind === "empowered" ? { ctx: empowered.ctx, onHit: empowered.onHit } : null;
-  const damage = effectiveStats(world, dot).attack;
+  const attack = effectiveStats(world, dot).attack;
+  const damage = dot.kind === "tower" ? towerShotDamage(world, dot, target, attack) : attack;
   if (dot.loadout.range === "melee") {
     landAuto(world, dot.id, dot.side, target, damage, bonus, dot.pos);
   } else {
@@ -119,7 +134,7 @@ function release(world: World, dot: Dot, target: Dot): void {
       side: dot.side,
       target: target.id,
       pos: { ...dot.pos },
-      speed: world.balance.dot.rangedAutoSpeed,
+      speed: autoStyle(world, dot).shotSpeed,
       damage,
       bonus,
     });
@@ -150,13 +165,12 @@ function landAuto(
 }
 
 export function stepProjectiles(world: World): void {
-  const r = world.balance.dot.radius;
   world.projectiles = world.projectiles.filter((p) => {
     const target = world.dots.get(p.target);
     if (!target || !target.alive) return false;
     const d = dist(p.pos, target.pos);
     const stride = p.speed * DT;
-    if (d - r <= stride) {
+    if (d - target.radius <= stride) {
       landAuto(world, p.owner, p.side, target, p.damage, p.bonus, p.pos);
       return false;
     }
@@ -194,14 +208,16 @@ export function damageDot(
   const source = world.dots.get(sourceId);
   if (source) source.damageDealt += amount;
   world.events.push({ kind: "hit", tick: world.tick, target: target.id, source: sourceId, amount: dealt, x: target.pos.x, y: target.pos.y, ability });
+  if (source?.kind === "dot" && target.kind === "dot" && source.side !== target.side) callForHelp(world, source, target);
   if (target.health > 1e-9) return;
   kill(world, target, sourceId, sourceSide);
 }
 
+/** Any unit dying. Only a dot's death scores, and only dots respawn; a minion leaves the world, a tower stays fallen. */
 function kill(world: World, target: Dot, sourceId: string, sourceSide: Side): void {
   target.health = 0;
   target.alive = false;
-  target.respawnIn = world.balance.dot.respawn;
+  target.respawnIn = target.kind === "dot" ? world.balance.dot.respawn : 0;
   target.path = [];
   clearAttack(target);
   target.statuses = [];
@@ -211,17 +227,23 @@ function kill(world: World, target: Dot, sourceId: string, sourceSide: Side): vo
   // Its hook goes with it; whoever it was dragging stops (their pull has nobody to drag them to).
   world.spells = world.spells.filter((s) => !(s.kind === "hook" && s.ctx.caster === target.id));
   target.anchoredBy = null;
+  world.events.push({ kind: "death", tick: world.tick, target: target.id, source: sourceId });
+  // Paid before the kill is counted, so the comeback multiplier sees the score as it was.
+  payForKill(world, target, sourceId, sourceSide);
+  if (target.kind !== "dot") return;
   target.deaths++;
   const source = world.dots.get(sourceId);
-  if (source) source.kills++;
-  world.events.push({ kind: "death", tick: world.tick, target: target.id, source: sourceId });
+  if (source) {
+    source.kills++;
+    source.killTimes.push(matchTime(world));
+  }
   world.score[sourceSide]++;
   if (world.score[sourceSide] >= world.balance.match.killsToWin) world.winner = sourceSide;
 }
 
+/** Dots only: passive regeneration, and the base heal. */
 export function heal(world: World, dot: Dot): void {
-  const baseDepth = world.balance.map.baseDepth;
-  const inOwnBase = dot.side === 0 ? dot.pos.x <= baseDepth : dot.pos.x >= world.geometry.length - baseDepth;
-  const perSecond = world.balance.dot.regenPerSecond + (inOwnBase ? dot.stats.maxHealth * world.balance.dot.baseHealPerSecond : 0);
+  if (dot.kind !== "dot") return;
+  const perSecond = world.balance.dot.regenPerSecond + (inOwnBase(world, dot) ? dot.stats.maxHealth * world.balance.dot.baseHealPerSecond : 0);
   dot.health = Math.min(effectiveStats(world, dot).maxHealth, dot.health + perSecond * DT);
 }

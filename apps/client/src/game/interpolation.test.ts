@@ -4,7 +4,12 @@ import { SnapshotBuffer } from "./interpolation.js";
 const status = { stunned: false, rooted: false, slowed: false, spellShield: false, barrier: 0, buffed: false, empowered: false, mark: null, invisible: false };
 const dot = (x: number) => ({
   id: "a",
+  kind: "dot" as const,
   side: 0 as const,
+  radius: 30,
+  ranged: true,
+  level: 1,
+  target: null,
   x,
   y: 0,
   facing: 0,

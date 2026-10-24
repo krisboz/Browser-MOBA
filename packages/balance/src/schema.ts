@@ -266,8 +266,22 @@ export const balanceSchema = z
       })
       .strict(),
     items: z.array(item).min(1),
+    shop: z.object({ inventorySlots: z.number().int().positive() }).strict(),
     minions: z
-      .object({ waveInterval: pos, firstWaveAt: nonNeg, melee: minionKind, ranged: minionKind })
+      .object({
+        waveInterval: pos,
+        firstWaveAt: nonNeg,
+        /** Share of the attack interval spent winding up, as for dots. */
+        autoWindUpShare: share,
+        /** Ranged minions' homing shots. */
+        shotSpeed: pos,
+        /** How far a minion looks for something to attack, from its centre to the target's edge. */
+        acquireRange: pos,
+        /** Seconds a minion keeps chasing a dot that attacked one of its side's dots. */
+        aggroDuration: nonNeg,
+        melee: minionKind,
+        ranged: minionKind,
+      })
       .strict(),
     towers: z
       .object({
@@ -278,6 +292,7 @@ export const balanceSchema = z
         radius: pos,
         rampPerConsecutiveHit: nonNeg,
         shotSpeed: pos,
+        autoWindUpShare: share,
       })
       .strict(),
     map: z

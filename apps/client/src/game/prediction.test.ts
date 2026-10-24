@@ -9,8 +9,8 @@ import { Predictor } from "./prediction.js";
  * A server and a client exchanging messages with a fixed one-way delay, all counted in ticks.
  * The server side mirrors apps/server's Room: commands wait for their tick, late ones run at once.
  */
-function harness({ oneWay, lead, dummyAt }: { oneWay: number; lead: number; dummyAt?: { x: number; y: number } }) {
-  const server = createWorld(seedV1);
+function harness({ oneWay, lead, dummyAt, lane = false }: { oneWay: number; lead: number; dummyAt?: { x: number; y: number }; lane?: boolean }) {
+  const server = createWorld(seedV1, { lane });
   const loadout = { preset: null, range: "ranged" as const, points: {}, abilities: { Q: null, W: null, E: null, R: null }, summoners: [null, null] as [null, null] };
   const dot = addDot(server, { id: "p1", side: 0, loadout });
   if (dummyAt) addDot(server, { id: "dummy", side: 1, loadout, pos: dummyAt, dummy: true });
@@ -21,7 +21,7 @@ function harness({ oneWay, lead, dummyAt }: { oneWay: number; lead: number; dumm
   let seq = 0;
   let t = 0;
 
-  const client = new Predictor(seedV1, "p1", 0, loadout, server.tick + lead, selfState(dot));
+  const client = new Predictor(seedV1, "p1", 0, loadout, server.tick + lead, selfState(server, dot));
   const corrections: number[] = [];
 
   function tick(click?: { x: number; y: number } | { attack: string }) {
@@ -69,6 +69,16 @@ describe("own-movement prediction", () => {
     for (let i = 0; i < 200; i++) h.tick();
     expect(Math.max(...h.corrections)).toBeLessThan(1e-9);
     expect(h.client.pos).toEqual(h.server.pos);
+  });
+
+  it("stays exact with minions and towers fighting around the dot", () => {
+    const h = harness({ oneWay: 4, lead: 4 + 2, lane: true });
+    for (let i = 0; i < 5; i++) h.tick();
+    h.tick({ x: 2000, y: 300 }); // under the enemy tower, and into its wave
+    for (let i = 0; i < 20 * 30; i++) h.tick();
+    expect(Math.max(...h.corrections)).toBeLessThan(1e-9);
+    expect(h.client.pos).toEqual(h.server.pos);
+    expect(h.server.deaths).toBe(1); // the tower and minions killed it, and it respawned: still no corrections
   });
 
   it("predicts walking into range of an attack target without corrections", () => {

@@ -62,7 +62,7 @@ export function stepMotion(world: World, dot: Dot): void {
       dot.motion = null;
       return settle(world, dot);
     }
-    const touch = world.balance.dot.radius * 2;
+    const touch = dot.radius + to.radius;
     const d = dist(dot.pos, to.pos);
     if (d - stride <= touch) {
       if (d > 1e-9) dot.pos = { x: to.pos.x + ((dot.pos.x - to.pos.x) / d) * touch, y: to.pos.y + ((dot.pos.y - to.pos.y) / d) * touch };
@@ -86,6 +86,5 @@ export function stepMotion(world: World, dot: Dot): void {
 
 /** A pull can drag a dot over a wall; wherever a movement leaves it, it ends up standing somewhere legal. */
 function settle(world: World, dot: Dot): void {
-  const r = world.balance.dot.radius;
-  if (!dot.motion && !isClear(world.geometry, dot.pos, r)) dot.pos = pushOut(world.geometry, dot.pos, r);
+  if (!dot.motion && !isClear(world.geometry, dot.pos, dot.radius)) dot.pos = pushOut(world.geometry, dot.pos, dot.radius);
 }

@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { StrictMode, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { serverUrl } from "./config.js";
 import { Game } from "./game/game.js";
@@ -44,11 +44,11 @@ function switchPreset(id: string) {
 
 const row: CSSProperties = { marginTop: 6, pointerEvents: "auto" };
 
-function AbilityBar({ abilities }: { abilities: HudState["abilities"] }) {
+function AbilityBar({ abilities, lockedUntil }: { abilities: HudState["abilities"]; lockedUntil: number }) {
   return (
     <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6, pointerEvents: "none" }}>
       {abilities.map((a, i) => {
-        const ready = a.cooldown <= 0;
+        const ready = a.cooldown <= 0 && !a.locked;
         return (
           <div
             key={a.slot}
@@ -67,10 +67,102 @@ function AbilityBar({ abilities }: { abilities: HudState["abilities"] }) {
             }}
           >
             {/* The dark overlay shrinks as the cooldown runs out. */}
-            <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${ready ? 0 : (100 * a.cooldown) / a.max}%`, background: "rgba(0,0,0,0.55)" }} />
-            <div style={{ position: "relative", fontWeight: "bold", fontSize: 16, marginTop: 4 }}>{ready ? a.slot : Math.ceil(a.cooldown)}</div>
-            <div style={{ position: "relative", marginTop: 4 }}>{a.name}</div>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: `${a.locked ? 100 : ready ? 0 : Math.min(100, (100 * a.cooldown) / a.max)}%`,
+                background: "rgba(0,0,0,0.55)",
+              }}
+            />
+            <div style={{ position: "relative", fontWeight: "bold", fontSize: 16, marginTop: 4 }}>
+              {a.locked ? a.slot : ready ? a.slot : Math.ceil(a.cooldown)}
+            </div>
+            <div style={{ position: "relative", marginTop: 4 }}>{a.locked ? `level ${lockedUntil}` : a.name}</div>
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const panel: CSSProperties = {
+  background: "rgba(20,27,32,0.9)",
+  border: "1px solid #455a64",
+  borderRadius: 6,
+  color: "#eceff1",
+  font: "12px ui-monospace, monospace",
+  padding: 8,
+};
+
+/** Gold, level and experience, and what you own, just left of the ability bar. */
+function Economy({ hud }: { hud: HudState }) {
+  const maxed = hud.level >= hud.maxLevel;
+  const names = new Map(hud.shop.map((i) => [i.id, i.name]));
+  return (
+    <div style={{ ...panel, position: "fixed", bottom: 16, left: 16, width: 220, pointerEvents: "none" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: "bold" }}>
+        <span style={{ color: "#ffd54f" }} data-testid="gold">
+          {hud.gold} g
+        </span>
+        <span data-testid="level">level {hud.level}</span>
+      </div>
+      <div style={{ marginTop: 6, height: 6, background: "#263238", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${maxed ? 100 : (100 * hud.xp) / hud.xpPerLevel}%`, height: "100%", background: "#9fe870" }} />
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+        {Array.from({ length: hud.itemSlots }, (_, i) => (
+          <div
+            key={i}
+            title={hud.items[i] ? names.get(hud.items[i]!) : "empty"}
+            style={{ flex: 1, height: 28, border: "1px solid #455a64", borderRadius: 3, fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", background: hud.items[i] ? "#37474f" : "transparent" }}
+          >
+            {hud.items[i] ? names.get(hud.items[i]!)?.slice(0, 5) : ""}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The shop: open while you stand in your base or wait to respawn. P toggles it anywhere, to look. */
+function Shop({ hud, open }: { hud: HudState; open: boolean }) {
+  if (!open && !hud.canShop) return null;
+  const full = hud.items.length >= hud.itemSlots;
+  return (
+    <div style={{ ...panel, position: "fixed", bottom: 110, left: 16, width: 220, pointerEvents: "auto" }}>
+      <div style={{ fontWeight: "bold", marginBottom: 6 }}>
+        shop {hud.canShop ? "" : "(go back to base to buy)"}
+      </div>
+      {hud.shop.map((item) => {
+        const can = hud.canShop && !full && hud.gold >= item.cost;
+        return (
+          <button
+            key={item.id}
+            disabled={!can}
+            onClick={() => hudActions.buy(item.id)}
+            data-testid={`buy-${item.id}`}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              width: "100%",
+              marginBottom: 3,
+              font: "inherit",
+              cursor: can ? "pointer" : "default",
+              background: can ? "#2e7d32" : "#263238",
+              color: can ? "#fff" : "#78909c",
+              border: "1px solid #455a64",
+              borderRadius: 3,
+              padding: "3px 6px",
+            }}
+          >
+            <span>
+              {item.name} <span style={{ opacity: 0.75 }}>{item.gives}</span>
+            </span>
+            <span style={{ color: can ? "#ffd54f" : undefined }}>{item.cost}</span>
+          </button>
         );
       })}
     </div>
@@ -79,6 +171,14 @@ function AbilityBar({ abilities }: { abilities: HudState["abilities"] }) {
 
 function Hud() {
   const hud = useHud();
+  const [shopOpen, setShopOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "p" && !e.repeat) setShopOpen((o) => !o);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   return (
     <>
       <div style={{ position: "fixed", top: 8, left: 8, color: "#cfd8dc", font: "12px ui-monospace, monospace", pointerEvents: "none" }}>
@@ -108,10 +208,12 @@ function Hud() {
             <Button onClick={() => hudActions.dummy("patrol")}>patrol on/off</Button>
           </div>
         )}
-        <div style={{ marginTop: 6 }}>right click: walk or attack · Q W E R, D F: cast at the cursor · S: stop (cancels a wind-up)</div>
+        <div style={{ marginTop: 6 }}>right click: walk or attack · Q W E R, D F: cast at the cursor · S: stop (cancels a wind-up) · P: shop</div>
       </div>
 
-      <AbilityBar abilities={hud.abilities} />
+      <AbilityBar abilities={hud.abilities} lockedUntil={hud.ultimateLevel} />
+      <Economy hud={hud} />
+      <Shop hud={hud} open={shopOpen} />
 
       <div style={{ position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", font: "bold 22px ui-monospace, monospace", pointerEvents: "none" }}>
         <span style={{ color: "#4ea8ff" }}>{hud.score[0]}</span>

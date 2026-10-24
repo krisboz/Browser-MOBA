@@ -9,15 +9,18 @@ export interface Stats {
   magicAttack: number;
   armor: number;
   magicResist: number;
+  /** Base movement speed, before any bonus. */
   moveSpeed: number;
+  /** Movement speed bonus from items, as a share (0.15 is +15%). Buffs add to it; see effectiveStats. */
+  moveBonus: number;
   range: number;
 }
 
-/** A dot's stats from the vanilla base plus its points. Items join in M4. */
-export function computeStats(balance: BalanceData, loadout: Loadout): Stats {
+/** A dot's stats: the vanilla base, plus its points, plus the items it has bought (by id). */
+export function computeStats(balance: BalanceData, loadout: Loadout, items: readonly string[] = []): Stats {
   const line = balance.dot.stats;
   const value = (key: (typeof STAT_KEYS)[number]) => line[key].base + line[key].perPoint * (loadout.points[key] ?? 0);
-  return {
+  const stats: Stats = {
     maxHealth: value("health"),
     attack: value("attack"),
     attackSpeed: value("attackSpeed"),
@@ -25,8 +28,27 @@ export function computeStats(balance: BalanceData, loadout: Loadout): Stats {
     armor: value("armor"),
     magicResist: value("magicResist"),
     moveSpeed: balance.dot.moveSpeed,
+    moveBonus: 0,
     range: balance.dot.range[loadout.range],
   };
+  for (const id of items) {
+    const bonus = balance.items.find((i) => i.id === id)?.stats ?? {};
+    stats.maxHealth += bonus.health ?? 0;
+    for (const key of STAT_KEYS) if (key !== "health") stats[key] += bonus[key] ?? 0;
+    stats.moveBonus += bonus.moveSpeedPct ?? 0;
+  }
+  return stats;
+}
+
+/** A minion's stats, from its line in the balance. */
+export function minionStats(balance: BalanceData, range: "melee" | "ranged"): Stats {
+  const m = balance.minions[range];
+  return { maxHealth: m.health, attack: m.damage, attackSpeed: m.attackSpeed, magicAttack: 0, armor: 0, magicResist: 0, moveSpeed: m.moveSpeed, moveBonus: 0, range: m.range };
+}
+
+export function towerStats(balance: BalanceData): Stats {
+  const t = balance.towers;
+  return { maxHealth: t.health, attack: t.damage, attackSpeed: t.attackSpeed, magicAttack: 0, armor: 0, magicResist: 0, moveSpeed: 0, moveBonus: 0, range: t.range };
 }
 
 /** Problems with a point spread: over the per-stat cap, over the budget, or not whole points. */

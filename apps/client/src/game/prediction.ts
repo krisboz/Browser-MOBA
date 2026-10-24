@@ -15,7 +15,8 @@ const GHOST: Loadout = {
 /**
  * Runs your own dot ahead of the server with the shared rules, so a click moves it on the next frame.
  * Each snapshot resets it to the server's state and replays the commands the server hasn't applied yet.
- * Other visible dots are copied in as still "ghosts", so chasing an attack target walks the right way.
+ * Other visible units (dots, minions, towers) are copied in as still "ghosts", so chasing an attack target walks the
+ * right way. The predicting world doesn't run the lane: no waves, no minion or tower targeting, no gold trickle.
  * Only your own movement is drawn from here; wind-ups, hits and everyone else come from the server.
  */
 export class Predictor {
@@ -120,7 +121,8 @@ export class Predictor {
     for (const d of snap.dots) {
       if (d.id === this.dotId) continue;
       seen.add(d.id);
-      const ghost = this.world.dots.get(d.id) ?? addDot(this.world, { id: d.id, side: d.side, loadout: GHOST, dummy: d.dummy });
+      const ghost = this.world.dots.get(d.id) ?? addDot(this.world, { id: d.id, kind: d.kind, side: d.side, loadout: GHOST, dummy: d.dummy });
+      ghost.radius = d.radius;
       ghost.pos = { x: d.x, y: d.y };
       ghost.path = [];
       ghost.patrol = null;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Bump on any breaking change to the messages below. Client and server refuse to talk across versions.
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 const finite = z.number().finite();
 const point = z.object({ x: finite, y: finite }).strict();
@@ -23,6 +23,8 @@ export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("stop"), seq, tick }).strict(),
   /** Cast an ability (Q W E R) or summoner (D F) aimed at a point. */
   z.object({ type: z.literal("cast"), seq, tick, slot: z.enum(SLOTS), aim: point }).strict(),
+  /** Buy an item: while standing in your own base, or while dead. */
+  z.object({ type: z.literal("buy"), seq, tick, item: id }).strict(),
 ]);
 export type Command = z.infer<typeof commandSchema>;
 
@@ -67,9 +69,19 @@ export interface DotStatus {
   invisible: boolean;
 }
 
+/** Dots are players (and the dummy); minions and towers are lane units the same rules apply to. */
+export type UnitKind = "dot" | "minion" | "tower";
+
 export interface DotSnapshot {
   id: string;
+  kind: UnitKind;
   side: Side;
+  radius: number;
+  /** Ranged units fire homing shots; melee ones hit at release. */
+  ranged: boolean;
+  level: number;
+  /** Towers only: what it is shooting, so you can see when it is you. Null for everything else. */
+  target: string | null;
   x: number;
   y: number;
   /** Radians; where the dot faces (its arms point this way). */
@@ -116,6 +128,12 @@ export interface SelfState {
   respawnIn: number;
   /** Seconds left on each slot's cooldown. */
   cooldowns: Record<CastSlot, number>;
+  gold: number;
+  level: number;
+  /** Experience into the current level. */
+  xp: number;
+  /** Item ids, in the order bought. */
+  items: string[];
   /** The sim's whole dot, opaque here; only packages/sim reads it. */
   dot: unknown;
 }
@@ -126,7 +144,10 @@ export type GameEvent =
   | { kind: "death"; tick: number; target: string; source: string }
   /** A spell shield or a dome stopped a spell. */
   | { kind: "blocked"; tick: number; target: string; source: string; x: number; y: number }
-  | { kind: "heal"; tick: number; target: string; amount: number; x: number; y: number };
+  | { kind: "heal"; tick: number; target: string; amount: number; x: number; y: number }
+  /** Gold paid to `target` for a last hit, kill or tower. Only its owner hears of it. */
+  | { kind: "gold"; tick: number; target: string; amount: number; x: number; y: number }
+  | { kind: "level"; tick: number; target: string; level: number; x: number; y: number };
 
 export interface Snapshot {
   /** The state after this many ticks. Commands tagged with this tick have not been applied yet. */

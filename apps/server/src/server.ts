@@ -3,6 +3,7 @@ import pg from "pg";
 import { WebSocketServer } from "ws";
 import { loadActiveBalance } from "./balance-loader.js";
 import type { ServerConfig } from "./config.js";
+import { postgresRecorder } from "./match-recorder.js";
 import { Room } from "./room.js";
 
 export interface RunningServer {
@@ -23,7 +24,7 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
   }
 
   // One room for everyone until M6 adds room ids in the URL.
-  const room = new Room(balance, config.snapshotRate);
+  const room = new Room(balance, config.snapshotRate, postgresRecorder(pool));
   room.start();
 
   const wss = new WebSocketServer({ host: config.host, port: config.port });

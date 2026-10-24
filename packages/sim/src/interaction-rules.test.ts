@@ -158,7 +158,7 @@ describe("Being pushed or pulled does not stop you acting.", () => {
 describe("A stun stops everything.", () => {
   it("no walking, attacking or casting; wind-ups and channels are cancelled", () => {
     const world = createWorld(seedV1);
-    const a = addDot(world, { id: "a", side: 0, loadout: kit({ Q: "bolt", R: "artillery" }, ["flash", null]), pos: { x: 1000, y: 300 } });
+    const a = addDot(world, { id: "a", side: 0, level: seedV1.levels.ultimateUnlockLevel, loadout: kit({ Q: "bolt", R: "artillery" }, ["flash", null]), pos: { x: 1000, y: 300 } });
     const b = addDot(world, { id: "b", side: 1, loadout: VANILLA, pos: { x: 1300, y: 300 } });
 
     applyCommand(world, "a", cast("R", 1300, 300)); // Artillery: channel
@@ -421,7 +421,7 @@ describe("Dome: enemy spells cast from outside are blocked and autos are not. A 
 
   function domed(balance = seedV1) {
     const world = createWorld(balance);
-    const tank = addDot(world, { id: "tank", side: 1, loadout: kit({ R: "dome" }, [null, null], "melee"), pos: { x: 1300, y: 300 } });
+    const tank = addDot(world, { id: "tank", side: 1, level: seedV1.levels.ultimateUnlockLevel, loadout: kit({ R: "dome" }, [null, null], "melee"), pos: { x: 1300, y: 300 } });
     applyCommand(world, "tank", cast("R", 1300, 300));
     run(world, 0.8); // wind-up, then fully expanded
     expect(world.spells.some((s) => s.kind === "zone")).toBe(true);

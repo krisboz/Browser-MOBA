@@ -48,9 +48,14 @@ export const seedV1: BalanceData = {
     { id: "ward", name: "Ward", cost: 400, stats: { magicResist: 50 } },
     { id: "heart", name: "Heart", cost: 400, stats: { health: 300 } },
   ],
+  shop: { inventorySlots: 6 }, // placeholder
   minions: {
     waveInterval: 20,
     firstWaveAt: 5, // placeholder
+    autoWindUpShare: 0.3, // placeholder: as for dots
+    shotSpeed: 900, // placeholder
+    acquireRange: 500, // placeholder
+    aggroDuration: 2, // placeholder
     // attackSpeed, range, moveSpeed and radius are placeholders ("short range", "long range", "slower than dots")
     melee: { count: 2, health: 300, damage: 25, attackSpeed: 1, range: 100, moveSpeed: 240, radius: 20 },
     ranged: { count: 2, health: 200, damage: 35, attackSpeed: 1, range: 400, moveSpeed: 240, radius: 20 },
@@ -63,6 +68,7 @@ export const seedV1: BalanceData = {
     radius: 50, // placeholder
     rampPerConsecutiveHit: 0.25,
     shotSpeed: 1200, // placeholder
+    autoWindUpShare: 0, // placeholder: the shot leaves at once
   },
   map: {
     id: "lane",

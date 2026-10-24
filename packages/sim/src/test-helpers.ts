@@ -29,6 +29,7 @@ export const cmd = {
 import type { EffectDef } from "@moba/balance";
 import type { CastSlot, Side } from "@moba/protocol";
 import { applyEffects } from "./spells.js";
+import { applyCommand } from "./world.js";
 import type { Dot } from "./types.js";
 
 /** A loadout with exactly these abilities and summoners, no points. */
@@ -60,3 +61,20 @@ export function inflict(world: World, target: Dot, effects: EffectDef[], from: {
 }
 
 export const near = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * A scripted farmer, standing in for a player in a normal farming game: it last hits any enemy minion one auto would
+ * kill, and otherwise waits a little behind its own wave. It never fights dots.
+ */
+export function farm(world: World, me: Dot): void {
+  if (!me.alive || (me.attackTarget && world.dots.get(me.attackTarget)?.alive)) return;
+  const killable = [...world.dots.values()]
+    .filter((d) => d.kind === "minion" && d.side !== me.side && d.alive && d.health <= me.stats.attack && near(d.pos, me.pos) <= 900)
+    .sort((a, b) => a.health - b.health)[0];
+  if (killable) return applyCommand(world, me.id, { type: "attack", seq: ++seq, tick: 0, target: killable.id });
+  const ahead = me.side === 0 ? 1 : -1;
+  const mine = [...world.dots.values()].filter((d) => d.kind === "minion" && d.side === me.side && d.alive).map((m) => m.pos.x * ahead);
+  const front = mine.length ? Math.max(...mine) : world.geometry.towers[me.side].x * ahead;
+  const x = Math.min(front - 250, (world.geometry.length / 2) * ahead) * ahead;
+  if (Math.abs(me.pos.x - x) > 40 && !me.path.length) applyCommand(world, me.id, { type: "move", seq: ++seq, tick: 0, to: { x, y: world.geometry.width / 2 } });
+}

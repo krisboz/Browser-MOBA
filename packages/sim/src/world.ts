@@ -1,11 +1,13 @@
 import type { BalanceData } from "@moba/balance";
-import type { CastSlot, Command, DotSnapshot, GameEvent, Loadout, SelfState, Side, Snapshot, SpellSnapshot } from "@moba/protocol";
+import type { CastSlot, Command, DotSnapshot, GameEvent, Loadout, SelfState, Side, Snapshot, SpellSnapshot, UnitKind } from "@moba/protocol";
 import { attackOrWalk, clearAttack, heal, stepProjectiles } from "./combat.js";
+import { buy, resetEconomy, xpIntoLevel } from "./economy.js";
 import { buildGeometry, type MapGeometry, type Vec } from "./geometry.js";
 import { stepMotion } from "./motion.js";
 import { findPath, NavGrid } from "./nav.js";
+import { addTowers, aimMinion, aimTower, stepLane } from "./lane.js";
 import { castSlot, stepCast, stepChannel, stepSpells, zoneRadius } from "./spells.js";
-import { computeStats } from "./stats.js";
+import { computeStats, minionStats, towerStats } from "./stats.js";
 import { interrupt, isInvisible, isRooted, isStunned, tickStatuses } from "./statuses.js";
 import { DT } from "./tick.js";
 import type { Dot, World } from "./types.js";
@@ -16,6 +18,7 @@ export type { Dot, Projectile, SpellEntity, Status, World, WindUp } from "./type
 export { damageDot, inRange } from "./combat.js";
 export { canCast } from "./spells.js";
 export { effectiveStats } from "./statuses.js";
+export { towerId, unitLoadout } from "./lane.js";
 
 const SLOT_KEYS: CastSlot[] = ["Q", "W", "E", "R", "D", "F"];
 const noCooldowns = (): Record<CastSlot, number> => ({ Q: 0, W: 0, E: 0, R: 0, D: 0, F: 0 });
@@ -37,8 +40,9 @@ function mapFor(balance: BalanceData) {
   return cached;
 }
 
-export function createWorld(balance: BalanceData): World {
-  return {
+/** A new world. With `lane`, it also runs the lane: towers stand, minion waves come, gold trickles in. */
+export function createWorld(balance: BalanceData, opts: { lane?: boolean } = {}): World {
+  const world: World = {
     balance,
     ...mapFor(balance),
     tick: 0,
@@ -49,23 +53,42 @@ export function createWorld(balance: BalanceData): World {
     score: [0, 0],
     winner: null,
     events: [],
+    lane: opts.lane ?? false,
+    matchStartTick: 0,
+    nextWaveIn: balance.minions.firstWaveAt,
   };
+  if (world.lane) addTowers(world);
+  return world;
 }
 
 export interface NewDot {
   id: string;
   side: Side;
   loadout: Loadout;
+  /** A player's dot unless said otherwise. */
+  kind?: UnitKind;
   pos?: Vec;
   dummy?: boolean;
+  /** Start above level 1 (tests, and dev). */
+  level?: number;
+}
+
+function unitStats(balance: BalanceData, kind: UnitKind, loadout: Loadout) {
+  if (kind === "minion") return { stats: minionStats(balance, loadout.range), radius: balance.minions[loadout.range].radius };
+  if (kind === "tower") return { stats: towerStats(balance), radius: balance.towers.radius };
+  return { stats: computeStats(balance, loadout), radius: balance.dot.radius };
 }
 
 export function addDot(world: World, opts: NewDot): Dot {
-  const stats = computeStats(world.balance, opts.loadout);
+  const kind = opts.kind ?? "dot";
+  const { stats, radius } = unitStats(world.balance, kind, opts.loadout);
   const home = opts.pos ?? world.geometry.spawns[opts.side];
+  const level = opts.level ?? 1;
   const dot: Dot = {
     id: opts.id,
+    kind,
     side: opts.side,
+    radius,
     loadout: opts.loadout,
     stats,
     home: { ...home },
@@ -94,6 +117,14 @@ export function addDot(world: World, opts: NewDot): Dot {
     deaths: 0,
     damageDealt: 0,
     damageTaken: 0,
+    gold: kind === "dot" ? world.balance.gold.start : 0,
+    goldEarned: kind === "dot" ? world.balance.gold.start : 0,
+    xp: (level - 1) * world.balance.levels.xpPerLevel,
+    level,
+    items: [],
+    killTimes: [],
+    minion: kind === "minion" ? { goal: { ...world.geometry.spawns[(1 - opts.side) as Side] }, aggroOn: null, aggroFor: 0 } : null,
+    tower: kind === "tower" ? { rampOn: null, hits: 0 } : null,
   };
   world.dots.set(dot.id, dot);
   return dot;
@@ -106,7 +137,10 @@ export function removeDot(world: World, id: string): void {
 
 export function applyCommand(world: World, dotId: string, cmd: Command): void {
   const dot = world.dots.get(dotId);
-  if (!dot || !dot.alive || world.winner !== null) return;
+  if (!dot || world.winner !== null) return;
+  // The shop is open to the dead too.
+  if (cmd.type === "buy") return void buy(world, dot, cmd.item);
+  if (!dot.alive) return;
   switch (cmd.type) {
     case "move":
       // A new order cancels a spell still winding up (nothing fires, no cooldown). Rooted or anchored,
@@ -137,17 +171,19 @@ export function applyCommand(world: World, dotId: string, cmd: Command): void {
 }
 
 /**
- * Advances the world by exactly one fixed tick. Per living dot: timers, then acting (a stun stops it, a spell
- * wind-up or channel takes the tick, otherwise attacking or walking), then any forced movement. Then spells,
- * autos in flight, and healing.
+ * Advances the world by exactly one fixed tick. First the lane's clock (waves, gold). Then per living unit: timers,
+ * then acting (a stun stops it, a spell wind-up or channel takes the tick, otherwise attacking or walking; minions and
+ * towers choose their target first), then any forced movement. Then spells, autos in flight, and healing.
  */
 export function step(world: World): void {
   if (world.winner !== null) {
     world.tick++;
     return;
   }
+  if (world.lane) stepLane(world);
   for (const dot of world.dots.values()) {
     if (!dot.alive) {
+      if (dot.kind !== "dot") continue;
       dot.respawnIn -= DT;
       if (dot.respawnIn <= 0) respawn(dot);
       continue;
@@ -160,6 +196,8 @@ export function step(world: World): void {
 
     if (isStunned(dot)) interrupt(dot);
     else if (!stepCast(world, dot) && !stepChannel(dot)) {
+      if (world.lane && dot.kind === "minion") aimMinion(world, dot);
+      if (world.lane && dot.kind === "tower") aimTower(world, dot);
       patrol(world, dot);
       attackOrWalk(world, dot);
     }
@@ -168,6 +206,8 @@ export function step(world: World): void {
   stepSpells(world);
   stepProjectiles(world);
   for (const dot of world.dots.values()) if (dot.alive) heal(world, dot);
+  // Dead minions leave; a fallen tower stays where it stood.
+  for (const [id, d] of world.dots) if (d.kind === "minion" && !d.alive) world.dots.delete(id);
   world.tick++;
 }
 
@@ -199,13 +239,21 @@ export function drainEvents(world: World): GameEvent[] {
   return out;
 }
 
-/** Starts a fresh match in the same world: score cleared, every dot back home at full health, spells gone. */
+/**
+ * Starts a fresh match in the same world: score cleared, minions gone, towers standing again, every dot back home at
+ * full health with starting gold, level 1 and no items.
+ */
 export function resetMatch(world: World): void {
   world.score = [0, 0];
   world.winner = null;
   world.projectiles = [];
   world.spells = [];
+  world.matchStartTick = world.tick;
+  world.nextWaveIn = world.balance.minions.firstWaveAt;
+  for (const [id, d] of world.dots) if (d.kind === "minion") world.dots.delete(id);
   for (const dot of world.dots.values()) {
+    resetEconomy(world, dot);
+    if (dot.tower) dot.tower = { rampOn: null, hits: 0 };
     respawn(dot);
     clearAttack(dot);
     interrupt(dot);
@@ -244,7 +292,12 @@ export function dotSnapshot(world: World, d: Dot): DotSnapshot {
   const has = (kind: Dot["statuses"][number]["kind"]) => d.statuses.some((s) => s.kind === kind);
   return {
     id: d.id,
+    kind: d.kind,
     side: d.side,
+    radius: d.radius,
+    ranged: d.loadout.range === "ranged",
+    level: d.level,
+    target: d.kind === "tower" ? d.attackTarget : null,
     x: d.pos.x,
     y: d.pos.y,
     facing: d.facing,
@@ -289,8 +342,19 @@ function spellSnapshot(s: World["spells"][number]): SpellSnapshot {
   }
 }
 
-export function selfState(d: Dot): SelfState {
-  return { x: d.pos.x, y: d.pos.y, alive: d.alive, respawnIn: d.respawnIn, cooldowns: { ...d.cooldowns }, dot: structuredClone(d) };
+export function selfState(world: World, d: Dot): SelfState {
+  return {
+    x: d.pos.x,
+    y: d.pos.y,
+    alive: d.alive,
+    respawnIn: d.respawnIn,
+    cooldowns: { ...d.cooldowns },
+    gold: d.gold,
+    level: d.level,
+    xp: xpIntoLevel(world.balance, d),
+    items: d.items.map((i) => i.id),
+    dot: structuredClone(d),
+  };
 }
 
 /** Puts a dot back into the state the server reported, for prediction to rerun from. */
@@ -313,7 +377,7 @@ export function snapshot(world: World, viewer: { side: Side; dotId: string | nul
       .map((p) => ({ id: p.id, side: p.side, x: p.pos.x, y: p.pos.y })),
     // Traps stay hidden from the other side.
     spells: world.spells.filter((s) => s.kind !== "trap" || s.ctx.side === viewer.side).map(spellSnapshot),
-    self: own ? selfState(own) : null,
+    self: own ? selfState(world, own) : null,
     score: [...world.score],
     winner: world.winner,
     events,

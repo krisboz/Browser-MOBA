@@ -1,12 +1,12 @@
 import type { BalanceData } from "@moba/balance";
-import type { CastSlot, DotSnapshot, GameEvent, Loadout, ServerMessage, Side } from "@moba/protocol";
-import { createWorld, FixedStepper, inRect, type MapGeometry } from "@moba/sim";
+import type { CastSlot, DotSnapshot, GameEvent, Loadout, ServerMessage, Side, UnitKind } from "@moba/protocol";
+import { createWorld, FixedStepper, inRect, levelledCooldown, type MapGeometry } from "@moba/sim";
 import { hudActions, hudStore, urlPreset } from "../store.js";
 import { ClockSync } from "./clock.js";
 import { SnapshotBuffer } from "./interpolation.js";
 import { Net } from "./net.js";
 import { Predictor } from "./prediction.js";
-import { Renderer, type ClickMarker, type DrawnDot, type FloatingText, type Vec } from "./renderer.js";
+import { Renderer, type ClickMarker, type DrawnDot, type FloatingText, type TowerRing, type Vec } from "./renderer.js";
 
 // Other dots are drawn two snapshot intervals in the past so there is almost always a snapshot on each side.
 const INTERP_DELAY = 0.1;
@@ -15,8 +15,10 @@ const NUMBER_LIFETIME = 0.9;
 const PING_INTERVAL = 0.5;
 // Beyond this many ticks off, the prediction clock jumps instead of easing back.
 const MAX_CLOCK_DRIFT = 6;
-// Extra slack around a dot for clicking on it, in pixels.
+// Extra slack around a unit for clicking on it, in pixels.
 const CLICK_SLOP = 10;
+// An enemy tower's range is drawn once you are this close to its edge.
+const TOWER_RING_NEAR = 200;
 const CAST_KEYS: Record<string, CastSlot> = { q: "Q", w: "W", e: "E", r: "R", d: "D", f: "F" };
 const SLOTS: CastSlot[] = ["Q", "W", "E", "R", "D", "F"];
 
@@ -28,7 +30,14 @@ interface Session {
   side: Side;
   loadout: Loadout;
   buffer: SnapshotBuffer;
+  /** What each unit seen so far is, for deciding which hits get a number. */
+  kinds: Map<string, UnitKind>;
 }
+
+const describeItem = (stats: BalanceData["items"][number]["stats"]) =>
+  Object.entries(stats)
+    .map(([k, v]) => (k === "moveSpeedPct" ? `+${Math.round((v ?? 0) * 100)}% move` : `+${v} ${k.replace(/([A-Z])/g, " $1").toLowerCase()}`))
+    .join(", ");
 
 /** The game loop: plain TS, no React. Owns the socket, the clock, the prediction and the canvas. */
 export class Game {
@@ -69,6 +78,7 @@ export class Game {
     this.net.addedPing = hudStore.get().addedPing;
     this.cleanup.push(hudStore.subscribe(() => (this.net.addedPing = hudStore.get().addedPing)));
     hudActions.dummy = (action) => this.net.dummy(action);
+    hudActions.buy = (item) => this.send({ type: "buy", item });
     this.listen(window, "resize", () => this.renderer.resize());
     this.listen(window, "keydown", (e) => this.onKey(e as KeyboardEvent));
     this.listen(canvas, "contextmenu", (e) => e.preventDefault());
@@ -116,6 +126,7 @@ export class Game {
           side: msg.side,
           loadout: msg.loadout,
           buffer: new SnapshotBuffer(msg.tickRate, INTERP_DELAY),
+          kinds: new Map(),
         };
         hudStore.set({
           status: "connected",
@@ -123,6 +134,11 @@ export class Game {
           preset: msg.loadout.preset,
           presets: balance.presets.map((p) => p.id),
           mySide: msg.side,
+          xpPerLevel: balance.levels.xpPerLevel,
+          maxLevel: balance.levels.maxLevel,
+          ultimateLevel: balance.levels.ultimateUnlockLevel,
+          itemSlots: balance.shop.inventorySlots,
+          shop: balance.items.map((i) => ({ id: i.id, name: i.name, cost: i.cost, gives: describeItem(i.stats) })),
         });
         // A few quick pings so prediction can start straight away.
         for (let i = 0; i < 3; i++) this.sendPing(now);
@@ -141,11 +157,13 @@ export class Game {
         const snap = msg.snap;
         s.buffer.push(snap, now);
         this.pendingEvents.push(...snap.events);
+        for (const d of snap.dots) s.kinds.set(d.id, d.kind);
         hudStore.set({
           score: snap.score,
           winner: snap.winner,
           respawnIn: snap.self && !snap.self.alive ? Math.ceil(snap.self.respawnIn) : null,
           hasDummy: snap.dots.some((d) => d.dummy),
+          ...(snap.self && { gold: Math.floor(snap.self.gold), level: snap.self.level, xp: snap.self.xp, items: snap.self.items }),
         });
         if (!snap.self) return;
         if (!this.predictor && this.clock.ready) {
@@ -171,7 +189,12 @@ export class Game {
   }
 
   private send(
-    body: { type: "move"; to: Vec } | { type: "attack"; target: string } | { type: "stop" } | { type: "cast"; slot: CastSlot; aim: Vec },
+    body:
+      | { type: "move"; to: Vec }
+      | { type: "attack"; target: string }
+      | { type: "stop" }
+      | { type: "cast"; slot: CastSlot; aim: Vec }
+      | { type: "buy"; item: string },
   ): void {
     const seq = ++this.seq;
     // Before the clock has synced there is nothing to predict with; the server applies an untimed command at once.
@@ -183,12 +206,13 @@ export class Game {
     if (!s) return null;
     const p = this.renderer.screenToWorld(screen);
     let best: DotSnapshot | null = null;
-    let bestDist = s.balance.dot.radius + CLICK_SLOP;
+    let bestGap = CLICK_SLOP;
+    // Nearest edge wins, so a minion standing on a dot doesn't hide it.
     for (const d of this.drawnEnemies) {
-      const dd = Math.hypot(d.x - p.x, d.y - p.y);
-      if (dd <= bestDist) {
+      const gap = Math.hypot(d.x - p.x, d.y - p.y) - d.radius;
+      if (gap <= bestGap) {
         best = d;
-        bestDist = dd;
+        bestGap = gap;
       }
     }
     return best;
@@ -208,7 +232,7 @@ export class Game {
   }
 
   private onKey(e: KeyboardEvent): void {
-    if (e.repeat) return;
+    if (e.repeat || e.target instanceof HTMLInputElement) return;
     const key = e.key.toLowerCase();
     if (key === "s") return this.send({ type: "stop" });
     const slot = CAST_KEYS[key];
@@ -270,13 +294,28 @@ export class Game {
 
   private updateAbilityBar(s: Session, now: number): void {
     this.lastAbilityHud = now;
-    const cooldowns = this.predictor?.self.cooldowns ?? s.buffer.latest?.self?.cooldowns;
-    if (!cooldowns) return;
+    const self = s.buffer.latest?.self;
+    const cooldowns = this.predictor?.self.cooldowns ?? self?.cooldowns;
+    if (!cooldowns || !self) return;
+    const level = self.level;
     const ids: Record<CastSlot, string | null> = { ...s.loadout.abilities, D: s.loadout.summoners[0], F: s.loadout.summoners[1] };
+    const depth = s.balance.map.baseDepth;
+    const pos = this.lastSelf ?? self;
+    const inBase = s.side === 0 ? pos.x <= depth : pos.x >= s.geometry.length - depth;
     hudStore.set({
+      canShop: !self.alive || inBase,
       abilities: SLOTS.flatMap((slot) => {
         const def = ids[slot] ? s.balance.abilities.find((a) => a.id === ids[slot]) ?? s.balance.summoners.find((a) => a.id === ids[slot]) : undefined;
-        return def ? [{ slot, name: def.name, cooldown: Math.round(cooldowns[slot] * 10) / 10, max: def.cooldown }] : [];
+        if (!def) return [];
+        return [
+          {
+            slot,
+            name: def.name,
+            cooldown: Math.round(cooldowns[slot] * 10) / 10,
+            max: levelledCooldown(s.balance, level, slot, def.cooldown),
+            locked: slot === "R" && level < s.balance.levels.ultimateUnlockLevel,
+          },
+        ];
       }),
     });
   }
@@ -290,11 +329,16 @@ export class Game {
 
     const dots: DrawnDot[] = [];
     for (const d of sample.dots) {
-      if (!d.alive) continue;
+      // A fallen tower is still drawn, as rubble.
+      if (!d.alive && d.kind !== "tower") continue;
       const isSelf = d.id === s.you;
       const pos = isSelf && selfPos ? selfPos : d;
       dots.push({
         pos,
+        kind: d.kind,
+        radius: d.radius,
+        ranged: d.ranged,
+        alive: d.alive,
         side: d.side,
         // Your own facing follows your prediction while walking, the server while winding up.
         facing: isSelf && this.predictor && d.windUp === null ? this.predictor.facing : d.facing,
@@ -317,11 +361,23 @@ export class Game {
     this.drawnEnemies = sample.dots.filter((d) => d.alive && d.side !== s.side);
     if (selfPos) this.renderer.followCamera(selfPos, dt);
 
+    // An enemy tower shows its reach when you come near it, in red when it is shooting at you.
+    let towerRing: TowerRing | null = null;
+    for (const t of sample.dots) {
+      if (t.kind !== "tower" || !t.alive || t.side === s.side || !selfPos) continue;
+      const gap = Math.hypot(t.x - selfPos.x, t.y - selfPos.y) - s.balance.dot.radius - s.balance.towers.range;
+      if (gap <= TOWER_RING_NEAR) towerRing = { pos: t, range: s.balance.towers.range, onYou: t.target === s.you };
+    }
+
     // Damage numbers appear when the drawn time reaches the hit, so they line up with the hit on screen.
     const due = this.pendingEvents.filter((e) => e.tick / s.tickRate <= sample.time);
     this.pendingEvents = this.pendingEvents.filter((e) => e.tick / s.tickRate > sample.time);
     for (const e of due) {
-      if (e.kind === "hit") this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.amount)), color: e.ability ? "#ffcc80" : "#fff3c4", age: 0 });
+      // Numbers for hits that involve you or land on a dot; the minion war stays quiet.
+      const shown = e.kind === "hit" && (e.source === s.you || e.target === s.you || s.kinds.get(e.target) === "dot");
+      if (e.kind === "hit" && shown) this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.amount)), color: e.ability ? "#ffcc80" : "#fff3c4", age: 0 });
+      if (e.kind === "gold") this.texts.push({ x: e.x, y: e.y - 14, text: `+${Math.round(e.amount)}g`, color: "#ffd54f", age: 0 });
+      if (e.kind === "level") this.texts.push({ x: e.x, y: e.y - 20, text: `LEVEL ${e.level}`, color: "#9fe870", age: 0 });
       if (e.kind === "blocked") this.texts.push({ x: e.x, y: e.y, text: "BLOCKED", color: "#ce93d8", age: 0 });
       if (e.kind === "heal" && e.amount > 0) this.texts.push({ x: e.x, y: e.y, text: `+${Math.round(e.amount)}`, color: "#a5d6a7", age: 0 });
     }
@@ -340,6 +396,7 @@ export class Game {
       texts: this.texts,
       marker: this.marker,
       mouse: this.mouse,
+      towerRing,
     });
   }
 }

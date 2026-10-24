@@ -19,7 +19,8 @@ const spellDamage = (events: GameEvent[], target: string) =>
 
 function arena(preset: string, dummyAt = { x: 1500, y: 300 }) {
   const world = createWorld(seedV1);
-  const me = addDot(world, { id: "me", side: 0, loadout: loadoutFor(seedV1, preset)!, pos: { x: 1200, y: 300 } });
+  // At the level R unlocks, so the whole kit is there.
+  const me = addDot(world, { id: "me", side: 0, loadout: loadoutFor(seedV1, preset)!, pos: { x: 1200, y: 300 }, level: seedV1.levels.ultimateUnlockLevel });
   const dummy = addDot(world, { id: "dummy", side: 1, loadout: VANILLA, pos: dummyAt, dummy: true });
   return { world, me, dummy };
 }

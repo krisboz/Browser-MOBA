@@ -21,8 +21,21 @@ export interface HudState {
   /** Seconds until you respawn, while dead. */
   respawnIn: number | null;
   hasDummy: boolean;
-  /** Your ability bar. */
-  abilities: { slot: string; name: string; cooldown: number; max: number }[];
+  /** Your ability bar. `locked` until the level that unlocks it (R). */
+  abilities: { slot: string; name: string; cooldown: number; max: number; locked: boolean }[];
+  gold: number;
+  level: number;
+  /** Experience into this level, and how much a level takes. */
+  xp: number;
+  xpPerLevel: number;
+  maxLevel: number;
+  ultimateLevel: number;
+  /** Item ids you own, in the order bought. */
+  items: string[];
+  itemSlots: number;
+  /** In your own base, or dead: the shop is open. */
+  canShop: boolean;
+  shop: { id: string; name: string; cost: number; gives: string }[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -45,6 +58,16 @@ let state: HudState = {
   respawnIn: null,
   hasDummy: false,
   abilities: [],
+  gold: 0,
+  level: 1,
+  xp: 0,
+  xpPerLevel: 100,
+  maxLevel: 10,
+  ultimateLevel: 3,
+  items: [],
+  itemSlots: 0,
+  canShop: false,
+  shop: [],
 };
 const listeners = new Set<() => void>();
 
@@ -63,6 +86,7 @@ export const hudStore = {
 /** Actions the HUD can ask of the game. The game fills these in when it starts. */
 export const hudActions = {
   dummy: (_action: "reset" | "patrol") => {},
+  buy: (_item: string) => {},
 };
 
 export const useHud = () => useSyncExternalStore(hudStore.subscribe, hudStore.get);

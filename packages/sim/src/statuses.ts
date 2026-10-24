@@ -6,8 +6,9 @@ export const isStunned = (dot: Dot) => dot.statuses.some((s) => s.kind === "stun
 export const isRooted = (dot: Dot) => dot.statuses.some((s) => s.kind === "root");
 export const isInvisible = (dot: Dot) => dot.statuses.some((s) => s.kind === "invisible");
 
-/** Walking needs: not stunned, rooted, anchored, channelling, winding up a spell, or being moved some other way. */
+/** Walking needs: not a tower, not stunned, rooted, anchored, channelling, winding up a spell, or being moved some other way. */
 export function canWalk(dot: Dot): boolean {
+  if (dot.kind === "tower") return false;
   return !isStunned(dot) && !isRooted(dot) && dot.anchoredBy === null && !dot.channel && !dot.cast && !dot.motion;
 }
 
@@ -52,7 +53,7 @@ export function tickStatuses(dot: Dot, dt: number): void {
   dot.statuses = dot.statuses.filter((s) => s.remaining > 1e-9 && !(s.kind === "barrier" && s.amount <= 1e-9));
 }
 
-/** Stats with buffs and slows applied. Movement speed: bonuses capped, then slowed. */
+/** Stats with buffs and slows applied. Movement speed: item and buff bonuses capped, then slowed. */
 export function effectiveStats(world: World, dot: Dot): Stats {
   const out: Stats = { ...dot.stats };
   let moveBonus = 0;
@@ -69,6 +70,7 @@ export function effectiveStats(world: World, dot: Dot): Stats {
     }
     moveBonus += (s.stats.moveSpeedPct ?? 0) * k;
   }
-  out.moveSpeed = Math.min(world.balance.dot.moveSpeedCap, dot.stats.moveSpeed * (1 + moveBonus)) * (1 - slow);
+  // Item and buff bonuses add up, then the cap, then the strongest slow.
+  out.moveSpeed = Math.min(world.balance.dot.moveSpeedCap, dot.stats.moveSpeed * (1 + dot.stats.moveBonus + moveBonus)) * (1 - slow);
   return out;
 }

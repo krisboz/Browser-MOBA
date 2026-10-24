@@ -1,5 +1,5 @@
 import type { BalanceData } from "@moba/balance";
-import type { DotSnapshot, DotStatus, ProjectileSnapshot, Side, SpellSnapshot } from "@moba/protocol";
+import type { DotSnapshot, DotStatus, ProjectileSnapshot, Side, SpellSnapshot, UnitKind } from "@moba/protocol";
 import type { MapGeometry } from "@moba/sim";
 import { armPose } from "./arms.js";
 
@@ -22,9 +22,14 @@ export interface FloatingText {
   age: number;
 }
 
-/** A dot as drawn: interpolated server state, with your own dot's position (and facing) from prediction. */
+/** A unit as drawn: interpolated server state, with your own dot's position (and facing) from prediction. */
 export interface DrawnDot {
   pos: Vec;
+  kind: UnitKind;
+  radius: number;
+  ranged: boolean;
+  /** Only fallen towers are drawn dead, as rubble. */
+  alive: boolean;
   side: Side;
   facing: number;
   health: number;
@@ -43,6 +48,14 @@ export interface DrawnDot {
   hovered: boolean;
 }
 
+/** An enemy tower's reach, drawn when you come near it. */
+export interface TowerRing {
+  pos: Vec;
+  range: number;
+  /** It is shooting at you. */
+  onYou: boolean;
+}
+
 export interface Scene {
   balance: BalanceData;
   geometry: MapGeometry;
@@ -56,6 +69,7 @@ export interface Scene {
   texts: FloatingText[];
   marker: ClickMarker | null;
   mouse: Vec | null;
+  towerRing: TowerRing | null;
 }
 
 export type { DotSnapshot };
@@ -68,6 +82,8 @@ const COLORS = {
   brush: "#1f4d2b",
   grid: "rgba(255,255,255,0.04)",
   side: ["#4ea8ff", "#ff5d5d"],
+  minion: ["#3a7fc4", "#c44a4a"],
+  rubble: "#33363b",
   self: "#ffffff",
   hover: "#ffd54f",
   healthBack: "rgba(0,0,0,0.55)",
@@ -160,14 +176,32 @@ export class Renderer {
     for (const w of g.walls) ctx.fillRect(o.x + w.x, o.y + w.y, w.w, w.h);
     g.pillars.forEach((t, side) => {
       const p = this.worldToScreen(t);
-      ctx.fillStyle = COLORS.wall;
+      const unit = scene.dots.find((d) => d.kind === "tower" && d.side === side);
+      const fallen = unit && !unit.alive;
+      ctx.fillStyle = fallen ? COLORS.rubble : COLORS.wall;
       ctx.beginPath();
       ctx.arc(p.x, p.y, t.r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = COLORS.side[side]!;
+      if (fallen) return;
+      ctx.strokeStyle = unit?.hovered ? COLORS.hover : COLORS.side[side]!;
       ctx.lineWidth = 4;
       ctx.stroke();
+      ctx.fillStyle = COLORS.side[side]!;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, t.r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
     });
+    const ring = scene.towerRing;
+    if (ring) {
+      const p = this.worldToScreen(ring.pos);
+      ctx.strokeStyle = ring.onYou ? "rgba(255,82,82,0.9)" : "rgba(255,255,255,0.25)";
+      ctx.lineWidth = ring.onYou ? 3 : 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ring.range, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     const { marker } = scene;
     if (scene.pathFrom && scene.path.length) {
@@ -199,7 +233,8 @@ export class Renderer {
 
     const r = balance.dot.radius;
     this.drawGroundSpells(scene);
-    for (const d of scene.dots) this.drawDot(d, r);
+    for (const d of scene.dots) if (d.kind === "minion") this.drawMinion(d);
+    for (const d of scene.dots) if (d.kind === "dot") this.drawDot(d, r);
     this.drawFlyingSpells(scene);
     for (const p of scene.projectiles) {
       const s = this.worldToScreen(p);
@@ -211,7 +246,7 @@ export class Renderer {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    for (const d of scene.dots) this.drawHealthBar(d, r);
+    for (const d of scene.dots) if (d.alive) this.drawHealthBar(d);
 
     ctx.font = "bold 16px ui-monospace, monospace";
     ctx.textAlign = "center";
@@ -289,6 +324,31 @@ export class Renderer {
       ctx.textAlign = "center";
       ctx.fillText("DUMMY", p.x, p.y + 4);
     }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Minions: small, darker than dots, no arms. Ranged ones have a hollow centre. A flash on each attack. */
+  private drawMinion(d: DrawnDot): void {
+    const { ctx } = this;
+    const p = this.worldToScreen(d.pos);
+    const r = d.radius;
+    this.drawStatusUnder(p, r, d.status);
+    ctx.globalAlpha = d.inBrush ? 0.5 : 1;
+    ctx.fillStyle = COLORS.minion[d.side]!;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    const flash = d.sinceRelease !== null && d.sinceRelease >= 0 && d.sinceRelease < 0.12;
+    ctx.strokeStyle = d.hovered ? COLORS.hover : flash ? "#ffffff" : "rgba(0,0,0,0.4)";
+    ctx.lineWidth = d.hovered || flash ? 2 : 1;
+    ctx.stroke();
+    if (d.ranged) {
+      ctx.fillStyle = COLORS.ground;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    this.drawStatusOver(p, r, d);
     ctx.globalAlpha = 1;
   }
 
@@ -457,15 +517,18 @@ export class Renderer {
     }
   }
 
-  private drawHealthBar(d: DrawnDot, r: number): void {
+  private drawHealthBar(d: DrawnDot): void {
     const { ctx } = this;
     const p = this.worldToScreen(d.pos);
-    const w = r * 2;
-    const x = p.x - r;
-    const y = p.y - r - 12;
+    const r = d.radius;
+    // Towers get a long bar, minions a thin one.
+    const w = d.kind === "tower" ? 90 : r * 2;
+    const h = d.kind === "minion" ? 3 : 5;
+    const x = p.x - w / 2;
+    const y = p.y - r - (d.kind === "minion" ? 8 : 12);
     ctx.fillStyle = COLORS.healthBack;
-    ctx.fillRect(x - 1, y - 1, w + 2, 7);
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
     ctx.fillStyle = COLORS.health[d.side]!;
-    ctx.fillRect(x, y, w * Math.max(0, d.health / d.maxHealth), 5);
+    ctx.fillRect(x, y, w * Math.max(0, d.health / d.maxHealth), h);
   }
 }

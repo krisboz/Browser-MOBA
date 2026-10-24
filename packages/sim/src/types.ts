@@ -1,5 +1,5 @@
 import type { AbilityDef, AreaBlockDef, BalanceData, DamageEffectDef, EffectDef, SummonerDef } from "@moba/balance";
-import type { CastSlot, GameEvent, Loadout, Side } from "@moba/protocol";
+import type { CastSlot, GameEvent, Loadout, Side, UnitKind } from "@moba/protocol";
 import type { MapGeometry, Vec } from "./geometry.js";
 import type { NavGrid } from "./nav.js";
 import type { Stats } from "./stats.js";
@@ -70,11 +70,19 @@ export interface Channel {
   shot: AreaBlockDef;
 }
 
+/**
+ * Anything on the map that fights: a player's dot (or the dummy), a minion or a tower. They share one shape so every
+ * rule (autos, spells, statuses, forced movement, vision) applies to all of them; `kind` only decides who controls
+ * them and what their death pays.
+ */
 export interface Dot {
   id: string;
+  kind: UnitKind;
   side: Side;
+  radius: number;
+  /** Minions and towers have one too: no points, no spells, and their range. */
   loadout: Loadout;
-  /** Base stats from points (items join in M4). Buffs and slows apply on top: see effectiveStats. */
+  /** Base stats from points and items (or the unit's balance line). Buffs and slows apply on top: see effectiveStats. */
   stats: Stats;
   /** Where it respawns. */
   home: Vec;
@@ -111,6 +119,21 @@ export interface Dot {
   deaths: number;
   damageDealt: number;
   damageTaken: number;
+  /** Economy, used by dots only. Gold is fractional because of the per-second trickle. */
+  gold: number;
+  /** Every coin paid this match, spent or not. */
+  goldEarned: number;
+  /** Experience earned this match; the level follows from it. */
+  xp: number;
+  level: number;
+  /** Items bought, with the match time in seconds. */
+  items: { id: string; at: number }[];
+  /** Match time in seconds of each kill. */
+  killTimes: number[];
+  /** Minions only: where it marches, and the dot it is chasing for attacking one of its side's dots. */
+  minion: { goal: Vec; aggroOn: string | null; aggroFor: number } | null;
+  /** Towers only: consecutive shots at the same target, for the ramp. */
+  tower: { rampOn: string | null; hits: number } | null;
 }
 
 /** A ranged auto in flight. Homes on its target with no physics and always lands, unless the target dies first. */
@@ -204,6 +227,13 @@ export interface World {
   nextId: number;
   score: [number, number];
   winner: Side | null;
+  /** Whether this world runs the lane: towers, minion waves, minion and tower targeting, the gold trickle. Only the
+   * server's does; tests and the client's prediction leave it off. */
+  lane: boolean;
+  /** Tick the current match started on. */
+  matchStartTick: number;
+  /** Seconds until the next minion wave. */
+  nextWaveIn: number;
   /** What happened since the last drainEvents. */
   events: GameEvent[];
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { PROTOCOL_VERSION, parseClientMessage, type Command, type GameEvent, type ServerMessage, type Side } from "@moba/protocol";
 import {
   addDot,
@@ -7,6 +8,7 @@ import {
   FixedStepper,
   isVisibleTo,
   loadoutFor,
+  matchTime,
   removeDot,
   resetHealth,
   resetMatch,
@@ -18,6 +20,7 @@ import {
 } from "@moba/sim";
 import type { WebSocket } from "ws";
 import type { BalanceVersion } from "./balance-loader.js";
+import type { MatchRecord, RecordMatch } from "./match-recorder.js";
 
 // A command may be tagged at most this far ahead of the server, so a client can't queue moves for later.
 const MAX_LEAD_TICKS = TICK_RATE;
@@ -27,6 +30,8 @@ const DUMMY_ID = "dummy";
 
 interface Player {
   dotId: string;
+  /** Anonymous id for this connection only: guests keep nothing between sessions. */
+  ref: string;
   side: Side;
   /** Commands waiting for their tick, in arrival order. */
   queue: Command[];
@@ -45,12 +50,14 @@ export class Room {
   private nextSnapshotTick = 0;
   private nextDotId = 1;
   private restartIn: number | null = null;
+  private startedAt = new Date();
 
   constructor(
     private readonly balance: BalanceVersion,
     private readonly snapshotRate: number,
+    private readonly recordMatch: RecordMatch,
   ) {
-    this.world = createWorld(balance.data);
+    this.world = createWorld(balance.data, { lane: true });
   }
 
   start(): void {
@@ -87,10 +94,12 @@ export class Room {
           ws.close();
           return;
         }
+        // The first person in starts a fresh match; an empty room stands still.
+        if (!this.players.size) this.newMatch();
         const side: Side = [...this.players.values()].some((p) => p.side === 0) ? 1 : 0;
         const dotId = `p${this.nextDotId++}`;
         addDot(this.world, { id: dotId, side, loadout });
-        this.players.set(ws, { dotId, side, queue: [], ackSeq: 0, events: [] });
+        this.players.set(ws, { dotId, ref: `guest-${randomUUID()}`, side, queue: [], ackSeq: 0, events: [] });
         this.updateDummy();
         this.send(ws, {
           t: "welcome",
@@ -127,12 +136,13 @@ export class Room {
     if (!player) return;
     removeDot(this.world, player.dotId);
     this.players.delete(ws);
-    // Nobody left: whoever comes next starts a fresh match.
-    if (!this.players.size) {
-      this.restartIn = null;
-      resetMatch(this.world);
-    }
     this.updateDummy();
+  }
+
+  private newMatch(): void {
+    this.restartIn = null;
+    resetMatch(this.world);
+    this.startedAt = new Date();
   }
 
   /** The target dummy stands in for the other side while only one person is here. */
@@ -155,6 +165,7 @@ export class Room {
   }
 
   private tick(): void {
+    if (!this.players.size) return;
     // Commands run on the tick they were tagged with; late ones run now, which the client's reconciliation absorbs.
     for (const player of this.players.values()) {
       const due = player.queue.filter((c) => c.tick <= this.world.tick);
@@ -169,6 +180,11 @@ export class Room {
     const events = drainEvents(this.world);
     for (const player of this.players.values()) {
       for (const e of events) {
+        // Gold is private; everything else goes to whoever can see it happen.
+        if (e.kind === "gold") {
+          if (e.target === player.dotId) player.events.push(e);
+          continue;
+        }
         const target = this.world.dots.get(e.target);
         const mine = "source" in e && e.source === player.dotId;
         if (mine || (target && isVisibleTo(this.world, target, player.side))) player.events.push(e);
@@ -176,12 +192,13 @@ export class Room {
     }
 
     if (this.world.winner !== null) {
-      this.restartIn ??= RESTART_AFTER;
-      this.restartIn -= 1 / TICK_RATE;
-      if (this.restartIn <= 0) {
-        this.restartIn = null;
-        resetMatch(this.world);
+      if (this.restartIn === null) {
+        this.restartIn = RESTART_AFTER;
+        const record = this.matchRecord();
+        this.recordMatch(record).catch((err) => console.error(`match record not saved: ${(err as Error).message}`));
       }
+      this.restartIn -= 1 / TICK_RATE;
+      if (this.restartIn <= 0) this.newMatch();
     }
 
     if (this.world.tick >= this.nextSnapshotTick) {
@@ -191,6 +208,35 @@ export class Room {
         player.events = [];
       }
     }
+  }
+
+  /** The finished match as it will be stored: every dot in it, the dummy included. */
+  private matchRecord(): MatchRecord {
+    const refs = new Map([...this.players.values()].map((p) => [p.dotId, p.ref]));
+    const dots = [...this.world.dots.values()].filter((d) => d.kind === "dot");
+    const winner = this.world.winner;
+    return {
+      balanceVersionId: this.balance.id,
+      mode: refs.size > 1 ? "1v1" : "dummy",
+      map: this.world.balance.map.id,
+      startedAt: this.startedAt,
+      lengthS: matchTime(this.world),
+      winnerSide: winner,
+      players: dots.map((d) => ({
+        side: d.side,
+        playerRef: refs.get(d.id) ?? d.id,
+        loadout: d.loadout,
+        result: d.side === winner ? "win" : "loss",
+        kills: d.kills,
+        deaths: d.deaths,
+        assists: 0, // 1v1: nobody to assist
+        damageDealt: d.damageDealt,
+        damageTaken: d.damageTaken,
+        gold: d.goldEarned,
+        items: d.items.map((i) => ({ item: i.id, time: i.at })),
+        killTimes: d.killTimes,
+      })),
+    };
   }
 
   private send(ws: WebSocket, msg: ServerMessage): void {

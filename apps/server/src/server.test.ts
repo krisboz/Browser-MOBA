@@ -141,8 +141,9 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
     expect(dummy).toMatchObject({ side: 1, x: seedV1.dummy.x, y: seedV1.dummy.y, health: 1000 });
 
     ws.send(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: 1, tick: 0, target: dummy!.id } }));
+    const you = welcome.t === "welcome" ? welcome.you : "";
     const hit = await until(
-      () => messages.flatMap((m) => (m.t === "snapshot" ? m.snap.events : [])).find((e) => e.kind === "hit"),
+      () => messages.flatMap((m) => (m.t === "snapshot" ? m.snap.events : [])).find((e) => e.kind === "hit" && e.source === you),
       15_000,
     );
     // Marksman has 8 attack points: 140 damage into a dummy with no armor.
@@ -154,6 +155,44 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
       return last?.t === "snapshot" && last.snap.dots.find((d) => d.dummy)?.health === 1000 ? true : undefined;
     });
     ws.close();
+  });
+
+  it("writes one match record at match end, stamped with the balance version", async () => {
+    const { url, pool } = await freshDb();
+    // A one-kill match against a dummy that one auto finishes.
+    const quick = structuredClone(seedV1);
+    quick.match.killsToWin = 1;
+    quick.dot.stats.health.base = 50;
+    await pool.query("INSERT INTO balance_versions (note, data, is_active) VALUES ('quick', $1, true)", [JSON.stringify(quick)]);
+    const { rows: versions } = await pool.query<{ id: number }>("SELECT id FROM balance_versions");
+    running = await startServer(config(url));
+
+    const ws = new WebSocket(`ws://127.0.0.1:${running.port}`);
+    const messages: ServerMessage[] = [];
+    ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    await new Promise((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ t: "hello", protocol: PROTOCOL_VERSION, preset: "marksman" }));
+    const withDummy = await until(() => messages.find((m) => m.t === "snapshot" && m.snap.dots.some((d) => d.dummy)));
+    const dummy = withDummy.t === "snapshot" ? withDummy.snap.dots.find((d) => d.dummy)! : null;
+    ws.send(JSON.stringify({ t: "cmd", cmd: { type: "attack", seq: 1, tick: 0, target: dummy!.id } }));
+    await until(() => messages.find((m) => m.t === "snapshot" && m.snap.winner === 0), 15_000);
+
+    const matches = await until(async () => {
+      const { rows } = await pool.query("SELECT * FROM matches");
+      return rows.length ? rows : undefined;
+    });
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({ balance_version_id: versions[0]!.id, mode: "dummy", map: "lane", winner_side: 0 });
+    const { rows: players } = await pool.query("SELECT * FROM match_players ORDER BY side");
+    expect(players).toMatchObject([
+      { side: 0, preset: "marksman", result: "win", kills: 1, deaths: 0, stat_build: { range: "ranged", points: { attack: 8 } } },
+      { side: 1, player_ref: "dummy", result: "loss", deaths: 1 },
+    ]);
+    expect(players[0].player_ref).toMatch(/^guest-/);
+    expect(players[0].spells).toMatchObject({ Q: "piercer", R: "overdrive" });
+    expect(players[0].kill_times).toHaveLength(1);
+    ws.close();
+    await pool.end();
   });
 
   it("refuses an unknown preset", async () => {
@@ -195,10 +234,10 @@ describe.skipIf(!adminUrl)("server startup against Postgres", () => {
   });
 });
 
-async function until<T>(find: () => T | undefined, timeoutMs = 3000): Promise<T> {
+async function until<T>(find: () => T | undefined | Promise<T | undefined>, timeoutMs = 3000): Promise<T> {
   const start = Date.now();
   for (;;) {
-    const found = find();
+    const found = await find();
     if (found) return found;
     if (Date.now() - start > timeoutMs) throw new Error("timed out waiting");
     await new Promise((r) => setTimeout(r, 20));

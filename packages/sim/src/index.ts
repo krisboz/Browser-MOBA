@@ -5,3 +5,4 @@ export * from "./vision.js";
 export * from "./map-check.js";
 export * from "./stats.js";
 export * from "./world.js";
+export * from "./economy.js";
